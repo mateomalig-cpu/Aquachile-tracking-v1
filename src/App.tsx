@@ -14,6 +14,8 @@ import {
   Mail,
   Archive,
   Undo,
+  Ship,
+  Anchor
 } from "lucide-react";
 import {
   PieChart,
@@ -30,10 +32,94 @@ import {
 } from "recharts";
 
 // =====================================================================
+// ESTILOS GLOBALES Y FUENTES (Inyección de CSS)
+// =====================================================================
+// Inyectamos la fuente Quicksand (pág 24 del manual) y definimos variables CSS
+const BrandStyles = () => (
+  <style>{`
+    @import url('https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,300;0,400;0,700;1,300&family=Quicksand:wght@400;500;600;700&display=swap');
+
+    :root {
+      --aq-blue: #425563;       /* Pantone 7545 C */
+      --aq-orange: #FE5000;     /* Pantone 021 C */
+      --aq-warm-gray: #D7D2CB;  /* Pantone Warm Gray 1 */
+      --aq-dark-gray: #6E6259;  /* Warm Gray 11 (Textos) */
+      --aq-turquoise: #279989;  /* Complementario 1 */
+      --aq-olive: #76881D;      /* Complementario 2 */
+      --aq-yellow: #DAAA00;     /* Complementario 3 */
+      --aq-bg-light: #F9F8F6;   /* Versión muy clara de Warm Gray para UI */
+    }
+
+    body {
+      font-family: 'Merriweather', serif; /* Sustituto web para Charter ITC */
+      background-color: var(--aq-bg-light);
+      color: var(--aq-blue);
+    }
+
+    h1, h2, h3, h4, .brand-font {
+      font-family: 'Quicksand', sans-serif; /* Tipografía complementaria del manual */
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    /* Botones Primarios (Naranja Toque) */
+    .btn-primary {
+      background-color: var(--aq-orange);
+      color: white;
+      transition: all 0.2s;
+    }
+    .btn-primary:hover {
+      background-color: #e64600;
+    }
+
+    /* Botones Secundarios (Azul Corporativo) */
+    .btn-secondary {
+      background-color: var(--aq-blue);
+      color: white;
+    }
+    .btn-secondary:hover {
+      background-color: #354451;
+    }
+
+    /* Inputs y Selects estilo "Papelería" */
+    .input-brand {
+      border: 1px solid #D7D2CB;
+      background-color: white;
+      font-family: 'Quicksand', sans-serif;
+      color: var(--aq-blue);
+    }
+    .input-brand:focus {
+      outline: none;
+      border-color: var(--aq-orange);
+      ring: 1px solid var(--aq-orange);
+    }
+    
+    /* Tablas */
+    .table-header {
+      background-color: #F0EFE9; /* Warm gray very light */
+      color: var(--aq-blue);
+      font-family: 'Quicksand', sans-serif;
+      font-weight: 700;
+      font-size: 0.75rem;
+    }
+  `}</style>
+);
+
+// =====================================================================
 // UTILIDADES GLOBALES
 // =====================================================================
 const clamp = (v: number, min: number, max: number) => Math.min(Math.max(v, min), max);
 const uid = () => Math.random().toString(36).slice(2);
+
+// Colores de Marca para Gráficos (Pág 17 del manual)
+const BRAND_CHART_COLORS = [
+  "#FE5000", // Naranja
+  "#425563", // Azul
+  "#279989", // Turquesa
+  "#76881D", // Verde Oliva
+  "#DAAA00", // Amarillo
+  "#6E6259", // Gris Oscuro
+];
 
 // =====================================================================
 // DEFINICIÓN DE TIPOS Y ESTADOS
@@ -44,8 +130,19 @@ type AssignmentTipo = "ORDEN" | "SPOT";
 type AssignmentEstado = "ACTIVA" | "ANULADA";
 type TabId = "dashboard" | "inventory" | "orders" | "assignments" | "categories" | "warehouse" | "clientUpdate";
 
+const TAB_CONFIG: { id: TabId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  { id: "dashboard", label: "Dashboard", icon: Layers },
+  { id: "inventory", label: "Inventory", icon: Warehouse },
+  { id: "orders", label: "Orders", icon: FileText },
+  { id: "warehouse", label: "Warehouses", icon: Warehouse },
+  { id: "assignments", label: "Allocations", icon: ClipboardList },
+  { id: "clientUpdate", label: "Tracking", icon: Mail },
+  { id: "categories", label: "Categories", icon: PieChartIcon },
+];
+
 type InventoryRow = {
   id: string;
+  customId?: string;
   ubicacion: string;
   bodega: string;
   planta: string;
@@ -104,7 +201,7 @@ type DashboardAgg = {
 
 const INVENTORY_LS_KEY = "inventory_v3";
 const ASSIGNMENTS_LS_KEY = "assignments_v3";
-const SALES_ORDERS_LS_KEY = "sales_orders_v1"; // <-- NUEVA LÍNEA
+const SALES_ORDERS_LS_KEY = "sales_orders_v1";
 
 // =====================================================================
 // CONFIGURACIÓN DE NOTIFICACIONES Y DATOS
@@ -128,43 +225,46 @@ function composeTrackingEmailHTML(inventoryRow: InventoryRow): string {
   const statusLabel = STATUS_LABELS[inventoryRow.status] || inventoryRow.status;
   const trackingLink = getTrackingLink(inventoryRow);
 
+  // Diseño de email adaptado a la marca (Azul corporativo + Naranja)
   return `
     <!DOCTYPE html>
     <html lang="en">
-    <body style="font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f4f7f6;">
+    <body style="font-family: 'Times New Roman', serif; margin: 0; padding: 20px; background-color: #F9F8F6;">
       <table width="100%" border="0" cellspacing="0" cellpadding="0">
         <tr>
           <td align="center">
-            <table width="600" border="0" cellspacing="0" cellpadding="0" style="background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+            <table width="600" border="0" cellspacing="0" cellpadding="0" style="background-color: #ffffff; border-top: 5px solid #FE5000; border-bottom: 1px solid #D7D2CB;">
               <tr>
-                <td style="padding: 20px; background-color: #0c2c4d; color: #ffffff;" align="center">
-                  <img src="/aquachile_logo.png" alt="AquaChile Logo" style="height: 40px; margin-bottom: 10px;">
-                  <h1 style="margin: 0; font-size: 24px;">Order Status Update</h1>
+                <td style="padding: 30px; background-color: #425563; color: #ffffff;" align="center">
+                   <!-- En prod: src="https://tuservidor.com/aquachile_logo_white.png" -->
+                   <h1 style="margin: 0; font-family: sans-serif; font-weight: 300; letter-spacing: 2px;">AQUACHILE</h1>
+                   <p style="margin-top:10px; font-size: 12px; color: #D7D2CB; text-transform: uppercase;">Order Status Update</p>
                 </td>
               </tr>
               <tr>
-                <td style="padding: 30px;">
-                  <p style="font-size: 16px; color: #333;">Dear ${inventoryRow.clientePrincipal},</p>
-                  <p style="font-size: 16px; color: #333;">This is an update regarding your shipment. The current status is now:</p>
-                  <div style="padding: 15px; background-color: #eaf6ff; border-left: 4px solid #007bff; margin: 20px 0; font-size: 18px; font-weight: bold; color: #007bff;">
+                <td style="padding: 40px;">
+                  <p style="font-size: 16px; color: #425563;">Dear ${inventoryRow.clientePrincipal},</p>
+                  <p style="font-size: 16px; color: #6E6259;">This is an update regarding your shipment. The current status is now:</p>
+                  <div style="padding: 15px; background-color: #F0EFE9; border-left: 4px solid #FE5000; margin: 25px 0; font-size: 18px; font-weight: bold; color: #425563; font-family: sans-serif;">
                     ${statusLabel}
                   </div>
-                  <p style="font-size: 16px; color: #333;">Details of the shipment:</p>
-                  <ul style="list-style: none; padding: 0; font-size: 14px; color: #555;">
-                    <li style="padding: 5px 0;"><strong>PO:</strong> ${inventoryRow.customerPO}</li>
-                    <li style="padding: 5px 0;"><strong>Material:</strong> ${inventoryRow.material}</li>
-                    <li style="padding: 5px 0;"><strong>ETA:</strong> ${inventoryRow.eta}</li>
+                  <p style="font-size: 14px; color: #6E6259; text-transform: uppercase; letter-spacing: 1px; font-weight: bold;">Shipment Details:</p>
+                  <ul style="list-style: none; padding: 0; font-size: 15px; color: #425563; line-height: 1.8;">
+                    <li style="border-bottom: 1px solid #eee; padding: 5px 0;"><strong>Customer PO:</strong> ${inventoryRow.customerPO}</li>
+                    <li style="border-bottom: 1px solid #eee; padding: 5px 0;"><strong>AquaChile Lot:</strong> ${inventoryRow.po}</li>
+                    <li style="border-bottom: 1px solid #eee; padding: 5px 0;"><strong>Material:</strong> ${inventoryRow.material}</li>
+                    <li style="border-bottom: 1px solid #eee; padding: 5px 0;"><strong>ETA:</strong> ${inventoryRow.eta}</li>
                   </ul>
-                  <p style="font-size: 16px; text-align: center; margin-top: 30px;">
-                    <a href="${trackingLink}" style="background-color: #007bff; color: #ffffff; padding: 12px 25px; text-decoration: none; border-radius: 5px; font-weight: bold;">
-                      View Live Tracking
+                  <p style="font-size: 16px; text-align: center; margin-top: 40px;">
+                    <a href="${trackingLink}" style="background-color: #FE5000; color: #ffffff; padding: 12px 30px; text-decoration: none; font-weight: bold; font-family: sans-serif; text-transform: uppercase; letter-spacing: 1px;">
+                      Track Order
                     </a>
                   </p>
                 </td>
               </tr>
-              <tr style="background-color: #f4f7f6;">
-                <td style="padding: 20px; text-align: center; font-size: 12px; color: #888;">
-                  This is an automated notification. Please do not reply to this email.
+              <tr style="background-color: #F9F8F6;">
+                <td style="padding: 20px; text-align: center; font-size: 11px; color: #999;">
+                  AquaChile Automated Notification. <br/> Please do not reply to this email.
                 </td>
               </tr>
             </table>
@@ -177,8 +277,8 @@ function composeTrackingEmailHTML(inventoryRow: InventoryRow): string {
 }
 
 const sampleInventoryData: InventoryRow[] = [
-  { id: "row-1", ubicacion: "Miami, FL", bodega: "MIA-1", planta: "Magallanes", produccion: "2025-11-03", eta: "2025-11-10", po: "40538940", customerPO: "PO-AC-001", time: "AM", awb: null, clientePrincipal: "AquaChile MIA", clientes: ["AquaChile MIA"], material: "1113199", descripcion: "SA TD Pr 4-5 LB#Bo Cp 35LB AQ", producto: "TD 4-5 35", sector: "SA", trim: "TD", size: "4-5", escamas: null, formatoCaja: 35, totalLbs: 175 * 35, empacado: "FILETES", cajasOrden: 175, cajasInv: 175, activo: true, status: "EN_TRANSITO", statusHistory: [{ at: new Date().toISOString(), status: "CONFIRMADO" }, { at: new Date().toISOString(), status: "EN_TRANSITO" }], trackingToken: uid() },
-  { id: "row-3", ubicacion: "Miami, FL", bodega: "MIA-2", planta: "Cardonal", produccion: "2025-11-04", eta: "2025-11-12", po: "40538656", customerPO: "PO-SM-002", time: "PM", awb: "123-45678901", clientePrincipal: "Santa Monica", clientes: ["Santa Monica"], material: "1113198", descripcion: "SA TD Pr 3-4 LB#Bo Cp 35LB AQ", producto: "TD 3-4 35", sector: "SA", trim: "TD", size: "3-4", escamas: "Se", formatoCaja: 35, totalLbs: 65 * 35, empacado: "FILETES", cajasOrden: 65, cajasInv: 65, activo: true, status: "CONFIRMADO", statusHistory: [{ at: new Date().toISOString(), status: "CONFIRMADO" }], trackingToken: uid() },
+  { id: "row-1", customId: "1001", ubicacion: "Miami, FL", bodega: "MIA-1", planta: "Magallanes", produccion: "2025-11-03", eta: "2025-11-10", po: "40538940", customerPO: "PO-AC-001", time: "AM", awb: null, clientePrincipal: "AquaChile MIA", clientes: ["AquaChile MIA"], material: "1113199", descripcion: "SA TD Pr 4-5 LB#Bo Cp 35LB AQ", producto: "TD 4-5 35", sector: "SA", trim: "TD", size: "4-5", escamas: null, formatoCaja: 35, totalLbs: 175 * 35, empacado: "FILETES", cajasOrden: 175, cajasInv: 175, activo: true, status: "EN_TRANSITO", statusHistory: [{ at: new Date().toISOString(), status: "CONFIRMADO" }, { at: new Date().toISOString(), status: "EN_TRANSITO" }], trackingToken: uid() },
+  { id: "row-3", customId: "1002", ubicacion: "Miami, FL", bodega: "MIA-2", planta: "Cardonal", produccion: "2025-11-04", eta: "2025-11-12", po: "40538656", customerPO: "PO-SM-002", time: "PM", awb: "123-45678901", clientePrincipal: "Santa Monica", clientes: ["Santa Monica"], material: "1113198", descripcion: "SA TD Pr 3-4 LB#Bo Cp 35LB AQ", producto: "TD 3-4 35", sector: "SA", trim: "TD", size: "3-4", escamas: "Se", formatoCaja: 35, totalLbs: 65 * 35, empacado: "FILETES", cajasOrden: 65, cajasInv: 65, activo: true, status: "CONFIRMADO", statusHistory: [{ at: new Date().toISOString(), status: "CONFIRMADO" }], trackingToken: uid() },
 ];
 
 const sampleSalesOrders: SalesOrder[] = [ { id: "DEM-1001", salesRep: "Juan Pérez", demandId: "DEM-1001", tos: "FOB", shipTo: "AquaChile MIA", pickUpDate: "2025-11-12", brand1: "AquaChile", material: "1113199", description: "SA TD Pr 4-5 LB#Bo Cp 35LB AQ", cases: 120, price: 5.4, flex: "Sí", incoterm: "FOB MIA", truck: "Truck 1", customerPO: "PO-AC-001", portEntry: "Miami", week: "W46", estadoAprobacion: "APROBADA", estadoProgreso: "PENDIENTE ASIGNACIÓN", unidadPrecio: "USD / lb", orden: "SO-9001", estadoPlanificacion: "PLANIFICADA", especie: "SA", especieDescripcion: "Salmón Atlántico", estadoDetPrecio: "OK", incoterms2: "FOB", brand: "AquaChile", }, { id: "DEM-1002", salesRep: "María López", demandId: "DEM-1002", tos: "CFR", shipTo: "Santa Monica", pickUpDate: "2025-11-13", brand1: "AquaChile", material: "1113198", description: "SA TD Pr 3-4 LB#Bo Cp 35LB AQ", cases: 80, price: 5.1, flex: "No", incoterm: "CFR LAX", truck: "Truck 2", customerPO: "PO-SM-002", portEntry: "Los Angeles", week: "W46", estadoAprobacion: "EN REVISIÓN", estadoProgreso: "PENDIENTE APROBACIÓN", unidadPrecio: "USD / lb", orden: "SO-9002", estadoPlanificacion: "PENDIENTE", especie: "SA", especieDescripcion: "Salmón Atlántico", estadoDetPrecio: "PENDIENTE", incoterms2: "CFR", brand: "AquaChile", }, ];
@@ -213,7 +313,6 @@ function saveAssignmentsToStorage(list: Assignment[]) {
   } catch { /* ignore */ }
 }
 
-// --- NUEVO: FUNCIONES PARA CARGAR Y GUARDAR ÓRDENES ---
 function loadSalesOrdersFromStorage(): SalesOrder[] {
   if (typeof window === "undefined") return sampleSalesOrders;
   try {
@@ -230,16 +329,12 @@ function saveSalesOrdersToStorage(list: SalesOrder[]) {
     window.localStorage.setItem(SALES_ORDERS_LS_KEY, JSON.stringify(list));
   } catch { /* ignore */ }
 }
-// --- FIN DE BLOQUE NUEVO ---
 
 function getTrackingLink(invRow: InventoryRow): string {
   if (!invRow.trackingToken) return "";
   const origin = typeof window !== "undefined" && window.location ? window.location.origin : "https://tracking.example";
   return `${origin}/track/${invRow.trackingToken}`;
 }
-
-const kpiCards = [ { id: "stock", label: "Cajas inventario (disponibles)", icon: Package }, { id: "pendingOrders", label: "Órdenes pendientes", icon: FileText }, { id: "assignments", label: "Asignaciones creadas", icon: ClipboardList }, { id: "totalLbs", label: "Lbs totales disponibles", icon: Layers }, ];
-const CATEGORY_COLORS = [ "#0ea5e9", "#6366f1", "#22c55e", "#f97316", "#ec4899", "#eab308", "#14b8a6", "#facc15", ];
 
 // =====================================================================
 // COMPONENTE PRINCIPAL: App
@@ -249,50 +344,49 @@ export default function App() {
   const [tab, setTab] = useState<TabId>("dashboard");
   const [search, setSearch] = useState("");
   const [inventory, setInventory] = useState<InventoryRow[]>(loadInventoryFromStorage);
-  const [salesOrders, setSalesOrders] = useState<SalesOrder[]>(loadSalesOrdersFromStorage); // <-- MODIFICADO
+  const [salesOrders, setSalesOrders] = useState<SalesOrder[]>(loadSalesOrdersFromStorage);
   const [assignments, setAssignments] = useState<Assignment[]>(loadAssignmentsFromStorage);
   
   const [showAssignmentForm, setShowAssignmentForm] = useState(false);
   const [assignmentMode, setAssignmentMode] = useState<AssignmentTipo>("ORDEN");
   const [showNewPOForm, setShowNewPOForm] = useState(false);
   const [showArchivedAssignments, setShowArchivedAssignments] = useState(false);
-  const [showNewSOForm, setShowNewSOForm] = useState(false); // <-- NUEVA LÍNEA
+  const [showNewSOForm, setShowNewSOForm] = useState(false);
 
   const path = typeof window !== "undefined" ? window.location.pathname : "/";
   if (path.startsWith("/track/")) {
     const token = path.split("/track/")[1] || "";
-    const invRow = loadInventoryFromStorage().find(i => i.trackingToken === token);
+    const storedInventory = loadInventoryFromStorage();
+    const storedAssignments = loadAssignmentsFromStorage();
+    const storedSalesOrders = loadSalesOrdersFromStorage();
+    const invRow = storedInventory.find(i => i.trackingToken === token);
     if (invRow) {
-      const relatedAssignments = loadAssignmentsFromStorage().filter(a => a.items.some(it => it.inventoryId === invRow.id));
-      const relatedSalesOrder = loadSalesOrdersFromStorage().find(so => so.customerPO === invRow.customerPO); // Carga dinámica
-      return <ClientTrackingView inventoryRow={invRow} assignments={relatedAssignments} salesOrder={relatedSalesOrder} />;
+      const relatedAssignments = storedAssignments.filter(a => a.items.some(it => it.inventoryId === invRow.id));
+      const relatedSalesOrder = storedSalesOrders.find(so => so.customerPO === invRow.customerPO); 
+      return <ClientTrackingView inventoryRow={invRow} assignments={relatedAssignments} salesOrder={relatedSalesOrder} salesOrders={storedSalesOrders} />;
     }
-    return <div className="flex items-center justify-center h-screen bg-gray-100"><div className="p-8 bg-white shadow-lg rounded-lg"><h1>Tracking link inválido o no encontrado.</h1></div></div>;
+    return (
+        <div className="flex items-center justify-center h-screen bg-[#F9F8F6]">
+            <div className="p-8 bg-white shadow-sm rounded-none border-t-4 border-[#FE5000]">
+                <h1 className="text-[#425563] text-xl font-bold font-['Quicksand']">Link no válido</h1>
+            </div>
+        </div>
+    );
   }
 
   const sendTrackingEmail = (inventoryId: string) => {
     const row = inventory.find(r => r.id === inventoryId);
-    if (!row) {
-      alert("Error: Inventory lot not found.");
-      return;
-    }
+    if (!row) return;
     
     let recipientEmail = clientDirectory[row.clientePrincipal]?.email;
     if (!recipientEmail) {
       const enteredEmail = prompt(`Please enter the email for ${row.clientePrincipal}:`);
-      if (!enteredEmail || !enteredEmail.includes('@')) {
-        alert("Invalid email provided. Sending canceled.");
-        return;
-      }
+      if (!enteredEmail || !enteredEmail.includes('@')) return;
       recipientEmail = enteredEmail;
     }
     
-    const emailSubject = `Update on your AquaChile Order: PO ${row.po}`;
     const emailBody = composeTrackingEmailHTML(row);
-    
     console.log("--- SIMULATING EMAIL ---");
-    console.log(`To: ${recipientEmail}`);
-    console.log(`Subject: ${emailSubject}`);
     console.log("Body (HTML):", emailBody);
     alert(`Email simulation sent for PO ${row.po} to ${recipientEmail}.\nCheck the developer console (F12) to see the HTML body.`);
   };
@@ -309,7 +403,6 @@ export default function App() {
     const totalCajasInv = vivos.reduce((s, r) => s + r.cajasInv, 0);
     const totalLbsAvailable = vivos.reduce( (s, r) => s + r.cajasInv * r.formatoCaja, 0 );
     const totalAssignments = assignments.length;
-    
     const pendingOrders = salesOrders.filter(so => so.estadoProgreso !== 'COMPLETADA').length; 
 
     return { totalCajasInv, totalAssignments, pendingOrders, totalLbsAvailable, };
@@ -360,12 +453,8 @@ export default function App() {
     );
   }, [inventory]);
   
-  // --- NUEVO: FUNCIÓN PARA MANEJAR CREACIÓN DE ORDEN ---
   const handleCreateNewSalesOrder = (data: Omit<SalesOrder, 'id'>) => {
-    const newOrder: SalesOrder = {
-      ...data,
-      id: `DEM-${uid()}`,
-    };
+    const newOrder: SalesOrder = { ...data, id: `DEM-${uid()}` };
     setSalesOrders(prev => {
       const nextState = [newOrder, ...prev];
       saveSalesOrdersToStorage(nextState);
@@ -373,13 +462,13 @@ export default function App() {
     });
     setShowNewSOForm(false);
   };
-  // --- FIN DE BLOQUE NUEVO ---
 
   const handleCreateNewPO = (data: Omit<InventoryRow, 'id' | 'totalLbs' | 'cajasInv' | 'activo' | 'clientes' | 'statusHistory' | 'trackingToken' | 'fechaCierre'>) => {
     const now = new Date().toISOString();
     const newPO: InventoryRow = {
       ...data,
       id: `row-${uid()}`,
+      customId: data.customId || "",
       cajasInv: data.cajasOrden,
       totalLbs: data.cajasOrden * data.formatoCaja,
       clientes: [data.clientePrincipal],
@@ -399,9 +488,7 @@ export default function App() {
     setInventory(prev => {
       const nextState = prev.map(row => {
         if (row.id !== rowId) return row;
-        const updatedRow = { ...row, status: newStatus, statusHistory: [...row.statusHistory, { at: new Date().toISOString(), status: newStatus }] };
-        console.log(`PO ${row.po} status updated to ${newStatus}.`);
-        return updatedRow;
+        return { ...row, status: newStatus, statusHistory: [...row.statusHistory, { at: new Date().toISOString(), status: newStatus }] };
       });
       saveInventoryToStorage(nextState);
       return nextState;
@@ -410,10 +497,10 @@ export default function App() {
 
   const handleCreateAssignment = (data: { tipo: AssignmentTipo; salesOrderId?: string; spotCliente?: string; spotRef?: string; items: OrderItem[] }) => {
     const cliente = data.tipo === "ORDEN" ? (salesOrders.find(s => s.id === data.salesOrderId)?.shipTo ?? "") : (data.spotCliente ?? "");
-    if (!cliente) { alert("Cliente no encontrado para la asignación."); return; }
+    if (!cliente) { alert("Cliente no encontrado."); return; }
     
     const hasStock = data.items.every(item => { const invItem = inventory.find(i => i.id === item.inventoryId); return invItem && invItem.cajasInv >= item.cajas; });
-    if (!hasStock) { alert("No hay stock suficiente para completar esta asignación."); return; }
+    if (!hasStock) { alert("Stock insuficiente."); return; }
 
     const newAssignment: Assignment = { id: `ASG-${String(assignments.length + 1).padStart(4, "0")}`, fecha: new Date().toISOString().slice(0, 10), ...data, cliente, estado: "ACTIVA", };
 
@@ -437,7 +524,7 @@ export default function App() {
     if (!asg) return;
 
     if (to === 'ANULADA') {
-      if (!window.confirm("¿Anular esta asignación y devolver stock? La asignación irá al historial.")) return;
+      if (!window.confirm("¿Anular esta asignación y devolver stock?")) return;
       setInventory(prevInv => {
         const nextState = prevInv.map(r => {
           const returnedItem = asg.items.find(it => it.inventoryId === r.id);
@@ -449,7 +536,7 @@ export default function App() {
       });
     } else {
       const hasStock = asg.items.every(item => { const invItem = inventory.find(i => i.id === item.inventoryId); return invItem && invItem.cajasInv >= item.cajas; });
-      if (!hasStock) { alert("No hay stock suficiente para reactivar esta asignación."); return; }
+      if (!hasStock) { alert("Stock insuficiente para reactivar."); return; }
       setInventory(prevInv => {
         const nextState = prevInv.map(r => {
           const assignedItem = asg.items.find(it => it.inventoryId === r.id);
@@ -466,28 +553,40 @@ export default function App() {
 
   return (
     <>
+      <BrandStyles />
       <Header />
-      <div className="min-h-screen bg-gray-50">
-        <header className="bg-slate-900 text-white sticky top-0 z-20">
-          <div className="max-w-7xl mx-auto px-6 py-3 flex items-center gap-4">
-            <nav className="flex flex-wrap gap-2 text-xs sm:text-sm">
-                <NavButton active={tab === "dashboard"} onClick={() => setTab("dashboard")} icon={Layers} label="Dashboard" />
-                <NavButton active={tab === "inventory"} onClick={() => setTab("inventory")} icon={Warehouse} label="Inventory" />
-                <NavButton active={tab === "orders"} onClick={() => setTab("orders")} icon={FileText} label="Orders" />
-                <NavButton active={tab === "warehouse"} onClick={() => setTab("warehouse")} icon={Warehouse} label="Warehouses" />
-                <NavButton active={tab === "assignments"} onClick={() => setTab("assignments")} icon={ClipboardList} label="Allocations" />
-                <NavButton active={tab === "clientUpdate"} onClick={() => setTab("clientUpdate")} icon={Mail} label="Tracking" />
-                <NavButton active={tab === "categories"} onClick={() => setTab("categories")} icon={PieChartIcon} label="Categories" />
-            </nav>
+      <div className="min-h-screen">
+        <header className="bg-[#425563] text-white sticky top-0 z-20 shadow-md">
+          <div className="max-w-7xl mx-auto px-6 py-4 flex flex-col sm:flex-row sm:items-center gap-4">
+            <div className="w-full flex flex-col gap-3">
+              <div className="sm:hidden">
+                <label className="sr-only" htmlFor="mobile-tab-select">Select section</label>
+                <select
+                  id="mobile-tab-select"
+                  value={tab}
+                  onChange={(e) => setTab(e.target.value as TabId)}
+                  className="w-full bg-white/10 text-white uppercase text-xs font-['Quicksand'] tracking-wide px-3 py-2 border border-white/20"
+                >
+                  {TAB_CONFIG.map(({ id, label }) => (
+                    <option key={id} value={id}>{label}</option>
+                  ))}
+                </select>
+              </div>
+              <nav className="hidden sm:flex flex-wrap gap-2 text-xs sm:text-sm font-['Quicksand'] tracking-wide overflow-x-auto pb-1">
+                {TAB_CONFIG.map(({ id, label, icon }) => (
+                  <NavButton key={id} active={tab === id} onClick={() => setTab(id)} icon={icon} label={label} />
+                ))}
+              </nav>
+            </div>
             {tab === "inventory" && (
-              <div className="ml-auto relative">
-                <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-400" />
-                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search Inventory..." className="pl-8 pr-3 py-2 rounded-xl bg-white/90 text-xs text-black w-64 border border-slate-700" />
+              <div className="sm:ml-auto relative w-full sm:w-auto">
+                <Search className="absolute left-2 top-2.5 h-4 w-4 text-[#D7D2CB]" />
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="SEARCH..." className="pl-8 pr-3 py-2 rounded-sm bg-[#354451] text-xs text-white w-full sm:w-64 border border-[#6E6259] focus:border-[#FE5000] focus:outline-none font-['Quicksand'] uppercase" />
               </div>
             )}
           </div>
         </header>
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-8">
           {tab === "dashboard" && ( <DashboardView kpis={kpis} agg={dashboardAgg} /> )}
           {tab === "inventory" && ( <InventoryView rows={filteredInventory} onNewPO={() => setShowNewPOForm(true)} /> )}
           {tab === "warehouse" && ( <WarehouseView inventory={inventory.filter(r => r.activo)} /> )}
@@ -510,59 +609,198 @@ export default function App() {
 // =====================================================================
 
 function Header() {
-  return ( <div className="w-full flex items-center gap-3 px-6 py-3 border-b bg-white"><img src="/aquachile_logo.png" alt="AquaChile" className="h-9 object-contain" /><div className="flex flex-col"><span className="font-semibold">Inventory & Orders Tracker</span></div></div> );
+  return ( 
+    <div className="w-full flex items-center gap-3 px-8 py-4 bg-white border-b border-[#D7D2CB]">
+        {/* Usamos el texto del logo con la fuente Quicksand si no carga la imagen, o la imagen original */}
+        <div className="flex items-center gap-2">
+            <img src="/aquachile_logo.png" alt="AquaChile" className="h-10 object-contain" />
+            {/* Fallback visual style mimicking logo text */}
+            <div className="hidden flex-col">
+                <span className="font-['Quicksand'] text-3xl text-[#425563] uppercase tracking-widest font-light">AquaChile</span>
+            </div>
+        </div>
+    </div> 
+  );
 }
 
 function Badge({ text }: { text: string }) {
-  const colors: Record<string, string> = { "EN_TRANSITO": "bg-amber-100 text-amber-700", "EN BODEGA": "bg-gray-100 text-gray-700", "CONFIRMADO": "bg-blue-100 text-blue-700", "LISTO_ENTREGA": "bg-yellow-100 text-yellow-700", "ENTREGADO": "bg-green-100 text-green-700", "RETRASO": "bg-red-100 text-red-700", "INCIDENCIA": "bg-orange-100 text-orange-700", "ANULADA": "bg-gray-200 text-gray-700", "APROBADA": "bg-green-100 text-green-700", "EN REVISIÓN": "bg-amber-100 text-amber-700", "ORDEN": "bg-indigo-100 text-indigo-700", "SPOT": "bg-purple-100 text-purple-700", "ACTIVA": "bg-green-100 text-green-700" };
-  return (<span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${ colors[text] || "bg-gray-100 text-gray-700" }`}>{text.replace(/_/g, " ")}</span>);
+  const key = text.toUpperCase();
+  const colors: Record<string, string> = { 
+    "EN_TRANSITO": "bg-[#FFEEE6] text-[#B93800] border-[#FE5000]",
+    "CONFIRMADO": "bg-[#E4ECF2] text-[#1E3A53] border-[#425563]",
+    "LISTO_ENTREGA": "bg-[#FFF3CC] text-[#9E7700] border-[#DAAA00]",
+    "ENTREGADO": "bg-[#E3F2D9] text-[#4A5B00] border-[#76881D]",
+    "RETRASO": "bg-[#FFE3E3] text-[#B42318] border-[#B42318]",
+    "INCIDENCIA": "bg-[#FFE3E3] text-[#B42318] border-[#B42318]",
+    "ANULADA": "bg-[#E7E2DD] text-[#4C4038] border-[#4C4038]",
+    "APROBADA": "bg-[#E3F2D9] text-[#4A5B00] border-[#76881D]",
+    "EN REVISIÓN": "bg-[#FFF3CC] text-[#9E7700] border-[#DAAA00]",
+    "ORDEN": "bg-[#E4ECF2] text-[#1E3A53] border-[#425563]",
+    "SPOT": "bg-[#D9F4EF] text-[#1E7A70] border-[#279989]",
+    "ACTIVA": "bg-[#E3F2D9] text-[#4A5B00] border-[#76881D]"
+  };
+  
+  const style = colors[key] || "bg-[#D7D2CB] text-[#6E6259] border-[#6E6259]";
+  const label = STATUS_LABELS[key as TrackingStatus] ?? text.replace(/_/g, " ");
+  
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-['Quicksand'] font-bold uppercase tracking-wider border ${style}`}>
+        {label}
+    </span>
+  );
 }
 
 function NavButton({ active, onClick, icon: Icon, label,}: { active: boolean; onClick: () => void; icon: React.ComponentType<{ className?: string }>; label: string; }) {
-  return (<button onClick={onClick} className={`px-3 py-1.5 rounded-full flex items-center gap-1.5 text-sm font-medium ${ active ? "bg-white text-slate-900" : "bg-white/5 hover:bg-white/10 text-white" }`}><Icon className="h-4 w-4" />{label}</button>);
+  return (
+    <button onClick={onClick} className={`px-4 py-2 flex items-center gap-2 text-xs font-bold uppercase transition-all ${ active ? "bg-[#FE5000] text-white" : "text-[#D7D2CB] hover:text-white" }`}>
+        <Icon className="h-4 w-4" />{label}
+    </button>
+  );
 }
 
 function DashboardView({ kpis, agg }: { kpis: { totalCajasInv: number; totalAssignments: number; pendingOrders: number; totalLbsAvailable: number; }; agg: DashboardAgg; }) {
   return (
-    <div className="space-y-6">
-      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {kpiCards.map(({ id, label, icon: Icon }) => {
+    <div className="space-y-8">
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        {[{ id: "stock", label: "Cajas en Inventario", icon: Package }, { id: "pendingOrders", label: "Órdenes Pendientes", icon: FileText }, { id: "assignments", label: "Asignaciones", icon: ClipboardList }, { id: "totalLbs", label: "Lbs Disponibles", icon: Layers }].map(({ id, label, icon: Icon }) => {
           const value = id === "stock" ? kpis.totalCajasInv : id === "pendingOrders" ? kpis.pendingOrders : id === "assignments" ? kpis.totalAssignments : kpis.totalLbsAvailable;
-          return ( <motion.div key={id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="bg-white rounded-2xl p-4 shadow-sm border flex items-center gap-3"><div className="p-2 rounded-xl bg-gray-50 border"><Icon className="h-5 w-5" /></div><div><div className="text-xs text-gray-500">{label}</div><div className="text-xl font-semibold">{id === 'totalLbs' ? value.toLocaleString() : value}</div></div></motion.div> );
+          return ( 
+            <motion.div key={id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="bg-white p-6 shadow-sm border-t-4 border-[#425563]">
+                <div className="flex justify-between items-start mb-4">
+                    <div className="p-2 bg-[#F9F8F6] rounded-full"><Icon className="h-6 w-6 text-[#FE5000]" /></div>
+                </div>
+                <div>
+                    <div className="text-xs font-['Quicksand'] font-bold text-[#6E6259] uppercase tracking-wider mb-1">{label}</div>
+                    <div className="text-3xl font-['Merriweather'] text-[#425563]">{id === 'totalLbs' ? value.toLocaleString() : value}</div>
+                </div>
+            </motion.div> 
+          );
         })}
       </div>
-      <div className="grid lg:grid-cols-2 gap-4">
-        <div className="bg-white rounded-2xl p-4 shadow-sm border"><h3 className="text-xs font-semibold text-gray-600 mb-2">Inventario por Bodega (Cajas)</h3><div className="h-64"><ResponsiveContainer width="100%" height="100%"><BarChart data={agg.byWarehouse}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="bodega" /><YAxis /><Tooltip /><Legend /><Bar dataKey="totalCajas" name="Cajas" fill="#0ea5e9" /></BarChart></ResponsiveContainer></div></div>
-        <div className="bg-white rounded-2xl p-4 shadow-sm border"><h3 className="text-xs font-semibold text-gray-600 mb-2">Inventario por Status</h3><div className="h-64"><ResponsiveContainer width="100%" height="100%"><BarChart data={agg.byStatus}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="status" /><YAxis /><Tooltip /><Legend /><Bar dataKey="cajas" name="Cajas" fill="#8b5cf6" /></BarChart></ResponsiveContainer></div></div>
+      <div className="grid lg:grid-cols-2 gap-6">
+        <div className="bg-white p-6 shadow-sm border border-[#D7D2CB]">
+            <h3 className="text-sm font-bold text-[#425563] mb-6 border-b border-[#FE5000] pb-2 inline-block">INVENTARIO POR BODEGA</h3>
+            <div className="h-64"><ResponsiveContainer width="100%" height="100%"><BarChart data={agg.byWarehouse}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E5E5" /><XAxis dataKey="bodega" tick={{fill: '#6E6259', fontSize: 10}} axisLine={false} /><YAxis tick={{fill: '#6E6259', fontSize: 10}} axisLine={false} /><Tooltip contentStyle={{backgroundColor: '#425563', color: '#fff', border: 'none'}} /><Bar dataKey="totalCajas" name="Cajas" fill="#425563" barSize={30} /></BarChart></ResponsiveContainer></div>
+        </div>
+        <div className="bg-white p-6 shadow-sm border border-[#D7D2CB]">
+            <h3 className="text-sm font-bold text-[#425563] mb-6 border-b border-[#FE5000] pb-2 inline-block">ESTADO DE INVENTARIO</h3>
+            <div className="h-64"><ResponsiveContainer width="100%" height="100%"><BarChart data={agg.byStatus}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E5E5" /><XAxis dataKey="status" tick={{fill: '#6E6259', fontSize: 10}} axisLine={false} /><YAxis tick={{fill: '#6E6259', fontSize: 10}} axisLine={false} /><Tooltip contentStyle={{backgroundColor: '#425563', color: '#fff', border: 'none'}} /><Bar dataKey="cajas" name="Cajas" fill="#279989" barSize={30} /></BarChart></ResponsiveContainer></div>
+        </div>
       </div>
-       <div className="bg-white rounded-2xl p-4 shadow-sm border"><h3 className="text-xs font-semibold text-gray-600 mb-2">Asignaciones (Activas/Anuladas)</h3><div className="h-64"><ResponsiveContainer width="100%" height="100%"><BarChart data={agg.assignmentsByStatus}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="status" /><YAxis /><Tooltip /><Legend /><Bar dataKey="count" name="Cantidad" fill="#22c55e" /></BarChart></ResponsiveContainer></div></div>
     </div>
   );
 }
 
 function InventoryView({ rows, onNewPO }: { rows: InventoryRow[]; onNewPO: () => void; }) {
   return (
-    <div className="bg-white rounded-2xl p-4 shadow-sm border">
-      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
-        <div><h2 className="font-semibold text-sm">Inventory</h2><p className="text-xs text-gray-500">Listado de POs disponibles en inventario.</p></div>
-        <button onClick={onNewPO} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-sky-600 text-white text-xs font-medium"><Plus className="h-3.5 w-3.5" />Agregar PO Manual</button>
+    <div className="bg-white shadow-sm border border-[#D7D2CB]">
+      <div className="p-6 border-b border-[#D7D2CB] flex items-center justify-between">
+        <div><h2 className="text-lg font-bold text-[#425563]">Inventario</h2><p className="text-xs text-[#6E6259] mt-1">Listado de lotes disponibles.</p></div>
+        <button onClick={onNewPO} className="btn-primary px-4 py-2 text-xs font-bold uppercase tracking-wider flex items-center gap-2"><Plus className="h-4 w-4" /> Nuevo Lote</button>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs border-collapse min-w-[1200px]">
+      <div className="hidden sm:block overflow-x-auto">
+        <table className="w-full text-xs text-[#6E6259] min-w-[1200px]">
           <thead>
-            <tr className="text-left text-gray-500 border-b">
-              <th className="py-2 px-2">PO</th><th className="px-2">Customer PO</th><th className="px-2">Material</th><th className="px-2">Cliente P.</th><th className="px-2 text-right">Cajas Disp.</th><th className="px-2">Status Tracking</th><th className="px-2">ETA</th><th className="px-2">Bodega</th><th className="px-2">Ubicación</th><th className="px-2">Planta</th><th className="px-2">Prod</th><th className="px-2">AWB</th><th className="px-2">Sector</th><th className="px-2">Trim</th><th className="px-2">Calibre</th><th className="px-2">Escamas</th>
+            <tr className="table-header">
+              <th className="py-3 px-4 text-left">ID</th>
+              <th className="px-4 text-left">AquaChile Lot</th>
+              <th className="px-4 text-left">Customer PO</th>
+              <th className="px-4 text-left">Material</th>
+              <th className="px-4 text-left">Description</th>
+              <th className="px-4 text-left">Product</th>
+              <th className="px-4 text-left">Trim</th>
+              <th className="px-4 text-left">Size</th>
+              <th className="px-4 text-left">Sector</th>
+              <th className="px-4 text-left">Client</th>
+              <th className="px-4 text-left">Warehouse</th>
+              <th className="px-4 text-left">Location</th>
+              <th className="px-4 text-left">Production Date</th>
+              <th className="px-4 text-left">Request ETA</th>
+              <th className="px-4 text-left">Time</th>
+              <th className="px-4 text-left">AWB</th>
+              <th className="px-4 text-left">Status</th>
+              <th className="px-4 text-right">Cases Ordered</th>
+              <th className="px-4 text-right">Cases Available</th>
+              <th className="px-4 text-right">Format (lb)</th>
+              <th className="px-4 text-right">Total Lbs</th>
             </tr>
           </thead>
-          <tbody>
-            {rows.map(r => (
-              <tr key={r.id} className="border-b last:border-0 hover:bg-gray-50">
-                <td className="py-2 px-2 font-mono">{r.po}</td><td className="px-2 font-mono">{r.customerPO}</td><td className="px-2 font-mono">{r.material}</td><td className="px-2">{r.clientePrincipal}</td><td className="px-2 text-right font-semibold">{r.cajasInv.toLocaleString()}</td><td className="px-2"><Badge text={r.status} /></td><td className="px-2">{r.eta}</td><td className="px-2">{r.bodega}</td><td className="px-2">{r.ubicacion}</td><td className="px-2">{r.planta}</td><td className="px-2">{r.produccion}</td><td className="px-2 font-mono">{r.awb ?? '--'}</td><td className="px-2">{r.sector}</td><td className="px-2">{r.trim}</td><td className="px-2">{r.size}</td><td className="px-2">{r.escamas}</td>
-              </tr>
-            ))}
-            {rows.length === 0 && ( <tr><td colSpan={16} className="text-center py-6 text-gray-400">No hay inventario que coincida con la búsqueda.</td></tr> )}
+          <tbody className="font-['Merriweather']">
+            {rows.map(r => {
+              const displayId = r.customId || r.id;
+              const availableLbs = r.cajasInv * r.formatoCaja;
+              return (
+                <tr key={r.id} className="border-b border-[#F0EFE9] hover:bg-[#F9F8F6]">
+                  <td className="py-3 px-4 font-bold text-[#425563]">{displayId}</td>
+                  <td className="px-4">{r.po}</td>
+                  <td className="px-4">{r.customerPO}</td>
+                  <td className="px-4">{r.material}</td>
+                  <td className="px-4">{r.descripcion}</td>
+                  <td className="px-4">{r.producto}</td>
+                  <td className="px-4">{r.trim}</td>
+                  <td className="px-4">{r.size}</td>
+                  <td className="px-4">{r.sector}</td>
+                  <td className="px-4">{r.clientePrincipal}</td>
+                  <td className="px-4">{r.bodega}</td>
+                  <td className="px-4">{r.ubicacion}</td>
+                  <td className="px-4">{r.produccion}</td>
+                  <td className="px-4">{r.eta}</td>
+                  <td className="px-4">{r.time}</td>
+                  <td className="px-4">{r.awb || "Pending"}</td>
+                  <td className="px-4"><Badge text={r.status} /></td>
+                  <td className="px-4 text-right font-bold">{r.cajasOrden.toLocaleString()}</td>
+                  <td className="px-4 text-right font-bold text-[#425563]">{r.cajasInv.toLocaleString()}</td>
+                  <td className="px-4 text-right">{r.formatoCaja.toLocaleString()}</td>
+                  <td className="px-4 text-right font-bold text-[#425563]">{availableLbs.toLocaleString()}</td>
+                </tr>
+              );
+            })}
+            {rows.length === 0 && ( <tr><td colSpan={21} className="text-center py-8 text-[#D7D2CB] italic">No hay datos disponibles.</td></tr> )}
           </tbody>
         </table>
+      </div>
+      <div className="sm:hidden p-4 space-y-4 bg-[#F9F8F6] border-t border-[#D7D2CB]">
+        {rows.map(r => {
+          const availableLbs = r.cajasInv * r.formatoCaja;
+          return (
+            <div key={r.id} className="bg-white shadow-sm border border-[#E5DED5] p-4 space-y-3">
+              <div className="flex justify-between items-start gap-2">
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-[#6E6259] font-['Quicksand']">ID</div>
+                  <div className="text-base font-bold text-[#425563]">{r.customId || r.id}</div>
+                  <div className="text-xs text-[#6E6259]">{r.po}</div>
+                </div>
+                <Badge text={r.status} />
+              </div>
+              <div className="grid grid-cols-2 gap-3 text-[11px] text-[#425563]">
+                <div>
+                  <div className="font-bold uppercase text-[#6E6259]">Customer</div>
+                  <div>{r.clientePrincipal}</div>
+                </div>
+                <div>
+                  <div className="font-bold uppercase text-[#6E6259]">ETA</div>
+                  <div>{r.eta}</div>
+                </div>
+                <div>
+                  <div className="font-bold uppercase text-[#6E6259]">Warehouse</div>
+                  <div>{r.bodega}</div>
+                </div>
+                <div>
+                  <div className="font-bold uppercase text-[#6E6259]">Available</div>
+                  <div className="font-bold">{r.cajasInv.toLocaleString()} cs</div>
+                  <div className="text-[10px] text-[#6E6259]">{availableLbs.toLocaleString()} lbs</div>
+                </div>
+              </div>
+              <div className="text-[11px] text-[#6E6259]">
+                <div className="font-bold uppercase">Material</div>
+                <div>{r.material}</div>
+                <div className="font-bold uppercase mt-2">Description</div>
+                <div>{r.descripcion}</div>
+              </div>
+            </div>
+          );
+        })}
+        {rows.length === 0 && <div className="text-center text-[#B4AAA1] italic text-sm">No hay datos disponibles.</div>}
       </div>
     </div>
   );
@@ -587,15 +825,31 @@ function WarehouseView({ inventory }: { inventory: InventoryRow[] }) {
   }, [inventory]);
 
   return (
-    <div className="bg-white rounded-2xl p-4 shadow-sm border">
-      <h2 className="font-semibold text-sm mb-3">Bodegas</h2>
-      <p className="text-xs text-gray-500 mb-3">Resumen de inventario por bodega y producto.</p>
-      {data.length === 0 && ( <div className="text-center text-gray-400 text-xs py-6">No hay inventario cargado.</div> )}
-      <div className="space-y-4">
+    <div className="bg-white p-6 shadow-sm border border-[#D7D2CB]">
+      <h2 className="text-lg font-bold text-[#425563] mb-6 border-b border-[#FE5000] pb-2 inline-block">BODEGAS</h2>
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {data.map((wh) => (
-          <div key={wh.bodega} className="border rounded-2xl p-3 bg-gray-50">
-            <div className="flex items-center justify-between mb-2"><div><div className="text-sm font-semibold">{wh.bodega}</div><div className="text-[11px] text-gray-500">{wh.ubicacion}</div></div><div className="text-right text-xs text-gray-600"><div>Cajas: <strong>{wh.totalCajas.toLocaleString()}</strong></div><div>Lbs: <strong>{wh.totalLbs.toLocaleString()}</strong></div></div></div>
-            <div className="overflow-x-auto"><table className="w-full text-[11px] border-collapse min-w-[400px] bg-white rounded-xl"><thead><tr className="text-left text-gray-500 border-b"><th className="py-1.5 px-2">Material</th><th className="px-2">Producto</th><th className="px-2 text-right">Cajas</th></tr></thead><tbody>{wh.productos.map((p) => (<tr key={p.key} className="border-b last:border-0"><td className="py-1.5 px-2 font-mono whitespace-nowrap">{p.material}</td><td className="px-2 whitespace-nowrap">{p.producto}</td><td className="px-2 text-right">{p.cajas.toLocaleString()}</td></tr>))}</tbody></table></div>
+          <div key={wh.bodega} className="border border-[#D7D2CB] p-0 bg-[#F9F8F6]">
+            <div className="p-4 bg-[#425563] text-white">
+                <div className="flex justify-between items-center">
+                    <span className="font-['Quicksand'] font-bold text-lg">{wh.bodega}</span>
+                    <span className="text-[10px] uppercase tracking-wider opacity-70">{wh.ubicacion}</span>
+                </div>
+            </div>
+            <div className="p-4">
+                <div className="flex justify-between text-xs text-[#6E6259] mb-4 border-b border-[#D7D2CB] pb-2">
+                    <span>Total Cajas: <strong className="text-[#425563]">{wh.totalCajas.toLocaleString()}</strong></span>
+                    <span>Lbs: <strong className="text-[#425563]">{wh.totalLbs.toLocaleString()}</strong></span>
+                </div>
+                <div className="space-y-2">
+                    {wh.productos.map(p => (
+                        <div key={p.key} className="flex justify-between text-[11px]">
+                            <span className="text-[#6E6259]">{p.producto}</span>
+                            <span className="font-bold text-[#425563]">{p.cajas.toLocaleString()}</span>
+                        </div>
+                    ))}
+                </div>
+            </div>
           </div>
         ))}
       </div>
@@ -605,18 +859,17 @@ function WarehouseView({ inventory }: { inventory: InventoryRow[] }) {
 
 function CategoriesView({ summary }: { summary: { key: string; sector: string; trim: string; size: string; cajas: number; }[]; }) {
   return (
-    <div className="bg-white rounded-2xl p-4 shadow-sm border">
-      <h2 className="font-semibold text-sm mb-3">Categorías (Sector / Trim / Size)</h2>
-      <div className="grid lg:grid-cols-2 gap-4">
+    <div className="bg-white p-6 shadow-sm border border-[#D7D2CB]">
+      <h2 className="text-lg font-bold text-[#425563] mb-6 border-b border-[#FE5000] pb-2 inline-block">CATEGORÍAS</h2>
+      <div className="grid lg:grid-cols-2 gap-8">
         <div className="overflow-x-auto">
-          <table className="w-full text-xs border-collapse min-w-[500px]">
-            <thead><tr className="text-left text-gray-500 border-b"><th className="py-2 px-2">Sector</th><th className="px-2">Trim</th><th className="px-2">Size</th><th className="px-2 text-right">Cajas en inventario</th></tr></thead>
-            <tbody>{summary.map((r) => (<tr key={r.key} className="border-b last:border-0"><td className="py-2 px-2 whitespace-nowrap">{r.sector}</td><td className="px-2 whitespace-nowrap">{r.trim}</td><td className="px-2 whitespace-nowrap">{r.size}</td><td className="px-2 text-right font-semibold">{r.cajas.toLocaleString()}</td></tr>))}</tbody>
+          <table className="w-full text-xs text-[#6E6259]">
+            <thead><tr className="table-header"><th className="py-2 px-4 text-left">Sector</th><th className="px-4 text-left">Trim</th><th className="px-4 text-left">Size</th><th className="px-4 text-right">Stock (Cajas)</th></tr></thead>
+            <tbody className="font-['Merriweather']">{summary.map((r) => (<tr key={r.key} className="border-b border-[#F0EFE9] hover:bg-[#F9F8F6]"><td className="py-2 px-4 font-bold">{r.sector}</td><td className="px-4">{r.trim}</td><td className="px-4">{r.size}</td><td className="px-4 text-right font-bold text-[#425563]">{r.cajas.toLocaleString()}</td></tr>))}</tbody>
           </table>
         </div>
-        <div className="bg-gray-50 rounded-2xl border p-4 flex flex-col">
-          <h3 className="text-xs font-medium text-gray-600 mb-2">Distribución por categoría (cajas disponibles)</h3>
-          <div className="flex-1 min-h-[220px]"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={summary} dataKey="cajas" nameKey="key" outerRadius={80} innerRadius={40} paddingAngle={2}>{summary.map((entry, index) => (<Cell key={entry.key} fill={CATEGORY_COLORS[index % CATEGORY_COLORS.length]} />))}</Pie><Tooltip formatter={(value: any) => `${(value as number).toLocaleString()} cj`} labelFormatter={(label) => `Cat: ${label}`} /></PieChart></ResponsiveContainer></div>
+        <div className="bg-[#F9F8F6] border border-[#D7D2CB] p-6 flex items-center justify-center">
+          <div className="w-full h-64"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={summary} dataKey="cajas" nameKey="key" outerRadius={80} innerRadius={50} paddingAngle={2}>{summary.map((entry, index) => (<Cell key={entry.key} fill={BRAND_CHART_COLORS[index % BRAND_CHART_COLORS.length]} strokeWidth={0} />))}</Pie><Tooltip contentStyle={{backgroundColor: '#425563', color: '#fff', border: 'none'}} /></PieChart></ResponsiveContainer></div>
         </div>
       </div>
     </div>
@@ -626,125 +879,203 @@ function CategoriesView({ summary }: { summary: { key: string; sector: string; t
 function AssignmentsView({ assignments, salesOrders, onToggleState, onNewAssignmentOrden, onNewAssignmentSpot, showArchived, onToggleArchived, }: { assignments: Assignment[]; salesOrders: SalesOrder[]; onToggleState: (id: string, to: AssignmentEstado) => void; onNewAssignmentOrden: () => void; onNewAssignmentSpot: () => void; showArchived: boolean; onToggleArchived: () => void; }) {
   const filteredAssignments = assignments.filter(a => showArchived ? a.estado === 'ANULADA' : a.estado === 'ACTIVA');
   return (
-    <div className="bg-white rounded-2xl p-4 shadow-sm border">
-      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
-        <div><h2 className="font-semibold text-sm">Allocations</h2><p className="text-xs text-gray-500">{showArchived ? "Historial de asignaciones anuladas" : "Asignaciones activas"}</p></div>
-        <div className="flex gap-2">
-          <button onClick={onToggleArchived} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gray-100 text-slate-800 text-xs font-medium"><Archive className="h-3.5 w-3.5" />{showArchived ? "Ver Activas" : "Ver Historial"}</button>
-          <button onClick={onNewAssignmentSpot} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gray-100 text-slate-800 text-xs font-medium"><Plus className="h-3.5 w-3.5" />Venta spot</button>
-          <button onClick={onNewAssignmentOrden} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-sky-600 text-white text-xs font-medium"><Plus className="h-3.5 w-3.5" />Nueva asignación</button>
+    <div className="bg-white shadow-sm border border-[#D7D2CB]">
+      <div className="p-6 border-b border-[#D7D2CB] flex items-center justify-between flex-wrap gap-4">
+        <div><h2 className="text-lg font-bold text-[#425563]">Asignaciones</h2><p className="text-xs text-[#6E6259] mt-1">{showArchived ? "Historial Anulado" : "Asignaciones Activas"}</p></div>
+        <div className="flex gap-3">
+          <button onClick={onToggleArchived} className="px-4 py-2 border border-[#6E6259] text-[#6E6259] text-xs font-bold uppercase hover:bg-[#6E6259] hover:text-white transition-colors"><Archive className="h-3 w-3 inline mr-1" />{showArchived ? "Ver Activas" : "Historial"}</button>
+          <button onClick={onNewAssignmentSpot} className="btn-secondary px-4 py-2 text-xs font-bold uppercase flex items-center gap-2"><Plus className="h-3 w-3" /> Venta Spot</button>
+          <button onClick={onNewAssignmentOrden} className="btn-primary px-4 py-2 text-xs font-bold uppercase flex items-center gap-2"><Plus className="h-3 w-3" /> Asignar</button>
         </div>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs border-collapse min-w-[1000px]">
-          <thead><tr className="text-left text-gray-500 border-b"><th className="py-2 px-2">Asignación</th><th className="px-2">Fecha</th><th className="px-2">Tipo</th><th className="px-2">Cliente</th><th className="px-2">Ref. Orden</th><th className="px-2 text-right">Cajas Totales</th><th className="px-2 text-right">Acción</th></tr></thead>
-          <tbody>
+      <div className="hidden sm:block overflow-x-auto">
+        <table className="w-full text-xs text-[#6E6259]">
+          <thead><tr className="table-header"><th className="py-3 px-4 text-left">ID</th><th className="px-4 text-left">Fecha</th><th className="px-4 text-left">Tipo</th><th className="px-4 text-left">Cliente</th><th className="px-4 text-left">Ref</th><th className="px-4 text-right">Cajas</th><th className="px-4 text-right">Acción</th></tr></thead>
+          <tbody className="font-['Merriweather']">
             {filteredAssignments.map(asg => {
               const cajas = asg.items.reduce((s, it) => s + it.cajas, 0);
               const ref = asg.tipo === 'ORDEN' ? (salesOrders.find(s => s.id === asg.salesOrderId)?.demandId ?? asg.salesOrderId) : asg.spotRef;
               return (
-                <tr key={asg.id} className="border-b last:border-0 hover:bg-gray-50">
-                  <td className="py-2 px-2 font-mono">{asg.id}</td><td className="px-2">{asg.fecha}</td><td className="px-2"><Badge text={asg.tipo} /></td><td className="px-2">{asg.cliente}</td><td className="px-2">{ref}</td><td className="px-2 text-right font-semibold">{cajas}</td>
-                  <td className="px-2 text-right">
-                    {showArchived ? (<button onClick={() => onToggleState(asg.id, 'ACTIVA')} className="inline-flex items-center gap-1 text-xs text-green-600 hover:text-green-800 font-medium"><Undo className="h-3 w-3" /> Reactivar</button>) : (<button onClick={() => onToggleState(asg.id, 'ANULADA')} className="inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-800 font-medium"><X className="h-3 w-3" /> Anular</button>)}
+                <tr key={asg.id} className="border-b border-[#F0EFE9] hover:bg-[#F9F8F6]">
+                  <td className="py-3 px-4 font-bold text-[#425563]">{asg.id}</td><td className="px-4">{asg.fecha}</td><td className="px-4"><Badge text={asg.tipo} /></td><td className="px-4">{asg.cliente}</td><td className="px-4">{ref}</td><td className="px-4 text-right font-bold">{cajas}</td>
+                  <td className="px-4 text-right">
+                    {showArchived ? (<button onClick={() => onToggleState(asg.id, 'ACTIVA')} className="text-[#279989] font-bold hover:underline text-[10px] uppercase"><Undo className="h-3 w-3 inline" /> Reactivar</button>) : (<button onClick={() => onToggleState(asg.id, 'ANULADA')} className="text-red-700 font-bold hover:underline text-[10px] uppercase"><X className="h-3 w-3 inline" /> Anular</button>)}
                   </td>
                 </tr>
               );
             })}
-            {filteredAssignments.length === 0 && ( <tr><td colSpan={7} className="text-center py-6 text-gray-400">No hay asignaciones en esta vista.</td></tr> )}
+            {filteredAssignments.length === 0 && ( <tr><td colSpan={7} className="text-center py-8 text-[#D7D2CB] italic">Sin asignaciones.</td></tr> )}
           </tbody>
         </table>
+      </div>
+      <div className="sm:hidden p-4 space-y-4 bg-[#F9F8F6] border-t border-[#D7D2CB]">
+        {inventory.map(r => (
+          <div key={r.id} className="bg-white border border-[#E5DED5] shadow-sm p-4 space-y-3">
+            <div className="flex justify-between items-start">
+              <div>
+                <div className="text-[10px] uppercase text-[#6E6259] font-bold">PO</div>
+                <div className="text-base font-bold text-[#425563]">{r.po}</div>
+                <div className="text-xs text-[#6E6259]">{r.clientePrincipal}</div>
+              </div>
+              <Badge text={r.status} />
+            </div>
+            <div className="text-[11px] text-[#6E6259] space-y-1">
+              <div><span className="font-bold uppercase">Tracking:</span> <a href={getTrackingLink(r)} target="_blank" rel="noreferrer" className="text-[#FE5000] font-bold">View Link</a></div>
+              <div><span className="font-bold uppercase">ETA:</span> {r.eta}</div>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <select value={r.status} onChange={e => onStatusChange(r.id, e.target.value as TrackingStatus)} className="input-brand flex-1 px-2 py-1 text-[10px] uppercase">
+                {statusOptions.map(s => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
+              </select>
+              <button onClick={() => onSendEmail(r.id)} className="btn-primary px-3 py-2 text-[10px] font-bold uppercase">Email</button>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
 }
+
 function ClientUpdateView({ inventory, onStatusChange, onSendEmail }: { inventory: InventoryRow[]; onStatusChange: (rowId: string, newStatus: TrackingStatus) => void; onSendEmail: (rowId: string) => void; }) {
   const statusOptions: TrackingStatus[] = [ "CONFIRMADO", "EN_TRANSITO", "LISTO_ENTREGA", "ENTREGADO", "RETRASO", "INCIDENCIA", ];
   return (
-    <div className="bg-white rounded-2xl p-4 shadow-sm border">
-      <h2 className="font-semibold text-sm mb-2">Tracking de Inventario</h2>
-      <p className="text-xs text-gray-500 mb-3">Este es el centro de control para el ciclo de vida de un PO. Actualiza el estado aquí para notificar a los clientes.</p>
+    <div className="bg-white shadow-sm border border-[#D7D2CB]">
+      <div className="p-6 border-b border-[#D7D2CB]">
+        <h2 className="text-lg font-bold text-[#425563]">Tracking Control</h2>
+        <p className="text-xs text-[#6E6259] mt-1">Gestión de estado de envíos y notificación a clientes.</p>
+      </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-xs border-collapse min-w-[900px]">
-          <thead><tr className="text-left text-gray-500 border-b"><th className="py-2 px-2">PO</th><th className="px-2">Cliente P.</th><th className="px-2">Link Tracking</th><th className="px-2">Status Actual</th><th className="px-2 text-right">Actualizar Status</th>
-<thead>
-  <tr className="text-left text-gray-500 border-b">
-    <th className="py-2 px-2">PO</th>
-    <th className="px-2">Cliente P.</th>
-    <th className="px-2">Link Tracking</th>
-    <th className="px-2">Status Actual</th>
-    <th className="px-2 text-right">Actualizar Status</th>
-    <th className="px-2 text-center">Notificar</th>
-  </tr>
-</thead></tr></thead>
-<tbody>
-  {inventory.map(r => (
-    <tr key={r.id} className="border-b last:border-0 hover:bg-gray-50">
-      <td className="py-2 px-2 font-mono">{r.po}</td>
-      <td className="px-2">{r.clientePrincipal}</td>
-      <td className="px-2">
-        <a href={getTrackingLink(r)} target="_blank" rel="noreferrer" className="text-sky-700 text-[11px] hover:underline" onClick={e => e.stopPropagation()}>
-          Ver Link
-        </a>
-      </td>
-      <td className="px-2"><Badge text={r.status} /></td>
-      <td className="px-2 text-right">
-        <select value={r.status} onChange={e => onStatusChange(r.id, e.target.value as TrackingStatus)} className="border rounded-md px-2 py-1 text-[11px] bg-white hover:border-sky-500">
-          {statusOptions.map(s => <option key={s} value={s}>{s.replace("_", " ")}</option>)}
-        </select>
-      </td>
-      <td className="px-2 text-center">
-        <button 
-          onClick={() => onSendEmail(r.id)} 
-          title="Send Tracking Email" 
-          className="p-1.5 rounded-full hover:bg-sky-100 text-sky-600 transition-colors"
-        >
-          <Mail className="h-4 w-4" />
-        </button>
-      </td>
-    </tr>
-  ))}
-  {inventory.length === 0 && ( 
-    <tr>
-      <td colSpan={6} className="text-center py-6 text-gray-400">
-        No hay inventario activo para mostrar.
-      </td>
-    </tr> 
-  )}
-</tbody>
+        <table className="w-full text-xs text-[#6E6259]">
+          <thead><tr className="table-header"><th className="py-3 px-4 text-left">ID</th><th className="px-4 text-left">PO</th><th className="px-4 text-left">Cliente</th><th className="px-4 text-left">Tracking Link</th><th className="px-4 text-left">Status Actual</th><th className="px-4 text-right">Acción Status</th><th className="px-4 text-center">Notificar</th></tr></thead>
+          <tbody className="font-['Merriweather']">
+            {inventory.map(r => (
+              <tr key={r.id} className="border-b border-[#F0EFE9] hover:bg-[#F9F8F6]">
+                <td className="py-3 px-4 font-bold text-[#425563]">{r.customId || r.id}</td>
+                <td className="px-4">{r.po}</td>
+                <td className="px-4">{r.clientePrincipal}</td>
+                <td className="px-4">
+                  <a href={getTrackingLink(r)} target="_blank" rel="noreferrer" className="text-[#FE5000] font-bold hover:underline text-[10px] uppercase font-['Quicksand']">
+                    View Link
+                  </a>
+                </td>
+                <td className="px-4"><Badge text={r.status} /></td>
+                <td className="px-4 text-right">
+                  <select value={r.status} onChange={e => onStatusChange(r.id, e.target.value as TrackingStatus)} className="input-brand px-2 py-1 text-[10px] uppercase">
+                    {statusOptions.map(s => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
+                  </select>
+                </td>
+                <td className="px-4 text-center">
+                  <button onClick={() => onSendEmail(r.id)} className="p-2 rounded-full hover:bg-[#F0EFE9] text-[#425563] transition-colors" title="Enviar Email">
+                    <Mail className="h-4 w-4" />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
         </table>
       </div>
     </div>
   );
 }
 
-// --- MODIFICADO: SalesOrdersView ahora tiene un botón para crear órdenes ---
 function SalesOrdersView({ orders, onNewOrder }: { orders: SalesOrder[], onNewOrder: () => void }) { 
   return (
-    <div className="bg-white rounded-2xl p-4 shadow-sm border">
-      <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
-        <h2 className="font-semibold text-sm">Órdenes de Venta</h2>
-        <button onClick={onNewOrder} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-sky-600 text-white text-xs font-medium">
-          <Plus className="h-3.5 w-3.5" />
-          Crear Orden Manual
-        </button>
+    <div className="bg-white shadow-sm border border-[#D7D2CB]">
+      <div className="p-6 border-b border-[#D7D2CB] flex items-center justify-between">
+        <h2 className="text-lg font-bold text-[#425563]">Órdenes de Venta</h2>
+        <button onClick={onNewOrder} className="btn-primary px-4 py-2 text-xs font-bold uppercase flex items-center gap-2"><Plus className="h-3 w-3" /> Crear Orden</button>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs border-collapse min-w-[2500px]">
+      <div className="hidden sm:block overflow-x-auto">
+        <table className="w-full text-xs text-[#6E6259] min-w-[1100px]">
           <thead>
-            <tr className="text-left text-gray-500 border-b">
-              <th className="p-2">Sales Rep</th><th className="p-2">Demand ID</th><th className="p-2">ToS</th><th className="p-2">ShipTo</th><th className="p-2">Pick up Date</th><th className="p-2">Brand1</th><th className="p-2">Material</th><th className="p-2">Description</th><th className="p-2 text-right">Cases</th><th className="p-2 text-right">Price</th><th className="p-2">Flex</th><th className="p-2">Incoterm</th><th className="p-2">Truck</th><th className="p-2">Customer PO</th><th className="p-2">Port Entry</th><th className="p-2">Week</th><th className="p-2">Estado Aprobación</th><th className="p-2">Estado Progreso</th><th className="p-2">Unidad Precio</th><th className="p-2">Orden</th><th className="p-2">Estado Planificación</th><th className="p-2">Especie</th><th className="p-2">Desc. Especie</th><th className="p-2">Estado Det. Precio</th><th className="p-2">Incoterms</th><th className="p-2">Brand</th>
+            <tr className="table-header">
+              <th className="py-3 px-4 text-left">Sales Rep</th>
+              <th className="px-4 text-left">Demand ID</th>
+              <th className="px-4 text-left">Customer PO</th>
+              <th className="px-4 text-left">Ship To</th>
+              <th className="px-4 text-left">Material</th>
+              <th className="px-4 text-left">Description</th>
+              <th className="px-4 text-right">Cases</th>
+              <th className="px-4 text-right">Price</th>
+              <th className="px-4 text-left">Pick Up</th>
+              <th className="px-4 text-left">TOS</th>
+              <th className="px-4 text-left">Incoterm</th>
+              <th className="px-4 text-left">Truck</th>
+              <th className="px-4 text-left">Port</th>
+              <th className="px-4 text-left">Week</th>
+              <th className="px-4 text-left">Approval</th>
+              <th className="px-4 text-left">Progress</th>
+              <th className="px-4 text-left">Flex</th>
+              <th className="px-4 text-left">Order #</th>
+              <th className="px-4 text-left">Brand</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="font-['Merriweather']">
             {orders.map(o => (
-              <tr key={o.id} className="border-b last:border-0 hover:bg-gray-50">
-                <td className="p-2">{o.salesRep}</td><td className="p-2">{o.demandId}</td><td className="p-2">{o.tos}</td><td className="p-2">{o.shipTo}</td><td className="p-2">{o.pickUpDate}</td><td className="p-2">{o.brand1}</td><td className="p-2 font-mono">{o.material}</td><td className="p-2">{o.description}</td><td className="p-2 text-right">{o.cases}</td><td className="p-2 text-right">{o.price}</td><td className="p-2">{o.flex}</td><td className="p-2">{o.incoterm}</td><td className="p-2">{o.truck}</td><td className="p-2">{o.customerPO}</td><td className="p-2">{o.portEntry}</td><td className="p-2">{o.week}</td><td className="p-2"><Badge text={o.estadoAprobacion} /></td><td className="p-2">{o.estadoProgreso}</td><td className="p-2">{o.unidadPrecio}</td><td className="p-2">{o.orden}</td><td className="p-2">{o.estadoPlanificacion}</td><td className="p-2">{o.especie}</td><td className="p-2">{o.especieDescripcion}</td><td className="p-2">{o.estadoDetPrecio}</td><td className="p-2">{o.incoterms2}</td><td className="p-2">{o.brand}</td>
+              <tr key={o.id} className="border-b border-[#F0EFE9] hover:bg-[#F9F8F6]">
+                <td className="py-3 px-4 font-bold text-[#425563]">{o.salesRep}</td>
+                <td className="px-4">{o.demandId}</td>
+                <td className="px-4">{o.customerPO}</td>
+                <td className="px-4">{o.shipTo}</td>
+                <td className="px-4">{o.material}</td>
+                <td className="px-4">{o.description}</td>
+                <td className="px-4 text-right font-bold">{o.cases}</td>
+                <td className="px-4 text-right">{o.price.toFixed(2)}</td>
+                <td className="px-4">{o.pickUpDate}</td>
+                <td className="px-4">{o.tos}</td>
+                <td className="px-4">{o.incoterm}</td>
+                <td className="px-4">{o.truck}</td>
+                <td className="px-4">{o.portEntry}</td>
+                <td className="px-4">{o.week}</td>
+                <td className="px-4"><Badge text={o.estadoAprobacion} /></td>
+                <td className="px-4">{o.estadoProgreso}</td>
+                <td className="px-4">{o.flex}</td>
+                <td className="px-4">{o.orden}</td>
+                <td className="px-4">{o.brand}</td>
               </tr>
             ))}
-             {orders.length === 0 && ( <tr><td colSpan={26} className="text-center py-6 text-gray-400">No hay órdenes de venta para mostrar.</td></tr> )}
+             {orders.length === 0 && ( <tr><td colSpan={19} className="text-center py-8 text-[#D7D2CB] italic">No hay órdenes de venta.</td></tr> )}
           </tbody>
         </table>
+      </div>
+      <div className="sm:hidden p-4 space-y-4 bg-[#F9F8F6] border-t border-[#D7D2CB]">
+        {orders.map(o => (
+          <div key={o.id} className="bg-white border border-[#E5DED5] shadow-sm p-4 space-y-3">
+            <div className="flex justify-between items-start">
+              <div>
+                <div className="text-[11px] font-bold uppercase text-[#6E6259]">Demand ID</div>
+                <div className="text-base font-bold text-[#425563]">{o.demandId}</div>
+                <div className="text-xs text-[#6E6259]">{o.customerPO}</div>
+              </div>
+              <Badge text={o.estadoAprobacion} />
+            </div>
+            <div className="grid grid-cols-2 gap-3 text-[11px] text-[#425563]">
+              <div>
+                <div className="font-bold uppercase text-[#6E6259]">Ship To</div>
+                <div>{o.shipTo}</div>
+              </div>
+              <div>
+                <div className="font-bold uppercase text-[#6E6259]">Cases</div>
+                <div className="font-bold">{o.cases.toLocaleString()}</div>
+              </div>
+              <div>
+                <div className="font-bold uppercase text-[#6E6259]">Price</div>
+                <div>${o.price.toFixed(2)}</div>
+              </div>
+              <div>
+                <div className="font-bold uppercase text-[#6E6259]">Incoterm</div>
+                <div>{o.incoterm}</div>
+              </div>
+            </div>
+            <div className="text-[11px] text-[#6E6259] space-y-1">
+              <div><span className="font-bold uppercase">Pick Up:</span> {o.pickUpDate}</div>
+              <div><span className="font-bold uppercase">Port:</span> {o.portEntry}</div>
+              <div><span className="font-bold uppercase">Truck:</span> {o.truck}</div>
+              <div><span className="font-bold uppercase">Status:</span> {o.estadoProgreso}</div>
+            </div>
+          </div>
+        ))}
+        {orders.length === 0 && <div className="text-center text-[#B4AAA1] italic text-sm">No hay órdenes de venta.</div>}
       </div>
     </div>
   );
@@ -756,326 +1087,494 @@ function NewPOForm({ onCreate, onCancel }: { onCreate: (data: Omit<InventoryRow,
   const productDescriptions = [ "HON 14-16 55", "R TD 2-3 10", "R TD 2-3 35", "R TD 3-4 10", "R TD 2-4 35", "R TD 3-4 SE 35", "R TD 4-5 35", "R TE 2-3 35", "R TE 3-4 35", "R TF 2-5 35", "SG TD 3-4 35", "SG TD Pr 3-4 35", "SG TD Pr 4-5 35", "TD 2-3 10", "TD 2-3 35", "TD 2-3 SE 10", "TD 2-3 SE 35", "TD 3-4 10", "TD 3-4 35", "TD 3-4 SE 10", "TD 3-4 SE 35", "TE 2-3 35", "TE 3-4 35", "TF 2-5 35" ];
 
   const [formData, setFormData] = useState({
-    po: "",
-    customerPO: "",
-    material: "",
-    descripcion: productDescriptions[0],
-    producto: "",
-    clientePrincipal: "",
-    ubicacion: warehouses[0].location,
-    bodega: warehouses[0].name,
-    planta: "Magallanes",
-    produccion: new Date().toISOString().slice(0, 10),
-    eta: new Date().toISOString().slice(0, 10),
-    status: "CONFIRMADO" as TrackingStatus,
-    cajasOrden: 100,
-    formatoCaja: 35,
-    sector: "SA",
-    trim: "TD",
-    size: "4-5",
-    escamas: "",
-    awb: "",
-    time: "AM",
-    empacado: productTypes[0],
+    customId: "",
+    po: "", customerPO: "", material: "", descripcion: productDescriptions[0], producto: "", clientePrincipal: "", ubicacion: warehouses[0].location, bodega: warehouses[0].name, planta: "Magallanes", produccion: new Date().toISOString().slice(0, 10), eta: new Date().toISOString().slice(0, 10), status: "CONFIRMADO" as TrackingStatus, cajasOrden: 100, formatoCaja: 35, sector: "SA", trim: "TD", size: "4-5", escamas: "", awb: "", time: "AM", empacado: productTypes[0],
   });
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-  };
-
-  const handleWarehouseChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const selected = warehouses.find(w => w.name === e.target.value);
-    if (selected) {
-      setFormData(prev => ({ ...prev, bodega: selected.name, ubicacion: selected.location }));
-    }
-  };
-  
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => { setFormData(prev => ({ ...prev, [e.target.name]: e.target.value })); };
+  const handleWarehouseChange = (e: React.ChangeEvent<HTMLSelectElement>) => { const selected = warehouses.find(w => w.name === e.target.value); if (selected) setFormData(prev => ({ ...prev, bodega: selected.name, ubicacion: selected.location })); };
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.po || !formData.material || !formData.clientePrincipal) {
-      alert("Por favor, completa los campos obligatorios: PO, Material y Cliente Principal.");
-      return;
-    }
+    if (!formData.customId || !formData.po || !formData.material) return;
     onCreate({ ...formData, cajasOrden: Number(formData.cajasOrden), formatoCaja: Number(formData.formatoCaja), awb: formData.awb || null, escamas: formData.escamas || null });
   };
 
   return (
-    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
-      <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-xl max-w-3xl w-full p-6 max-h-[90vh] overflow-y-auto space-y-4">
-        <div className="flex items-center justify-between pb-2 border-b">
-          <h2 className="text-lg font-semibold">Agregar Nuevo Lote al Inventario</h2>
-          <button type="button" onClick={onCancel} className="rounded-full p-1.5 hover:bg-gray-100"><X className="h-4 w-4" /></button>
+    <div className="fixed inset-0 bg-[#425563]/80 flex items-center justify-center z-50 p-4">
+      <form onSubmit={handleSubmit} className="bg-white shadow-2xl max-w-3xl w-full p-8 max-h-[90vh] overflow-y-auto border-t-8 border-[#FE5000]">
+        <div className="flex items-center justify-between pb-4 border-b border-[#D7D2CB] mb-6">
+          <h2 className="text-xl font-bold text-[#425563] font-['Quicksand']">NUEVO LOTE DE INVENTARIO</h2>
+          <button type="button" onClick={onCancel} className="text-[#6E6259] hover:text-[#FE5000]"><X className="h-6 w-6" /></button>
         </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 text-xs">
-          <div className="space-y-3">
-            <div><label className="block font-medium text-gray-600 mb-1">PO (*)</label><input name="po" value={formData.po} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5" /></div>
-             <div><label className="block font-medium text-gray-600 mb-1">Customer PO</label><input name="customerPO" value={formData.customerPO} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5" /></div>
-            <div><label className="block font-medium text-gray-600 mb-1">Material (*)</label><input name="material" value={formData.material} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5" /></div>
-            <div><label className="block font-medium text-gray-600 mb-1">Cliente Principal (*)</label><input name="clientePrincipal" value={formData.clientePrincipal} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5" /></div>
-            <div>
-              <label className="block font-medium text-gray-600 mb-1">Descripción</label>
-              <select name="descripcion" value={formData.descripcion} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5 bg-white">
-                {productDescriptions.map(desc => (<option key={desc} value={desc}>{desc}</option>))}
-              </select>
-            </div>
-            <div><label className="block font-medium text-gray-600 mb-1">Producto</label><input name="producto" value={formData.producto} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5" /></div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-sm text-[#6E6259]">
+          <div className="space-y-4">
+            <div><label className="block font-bold mb-1">Inventory ID (*)</label><input name="customId" value={formData.customId} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
+            <div><label className="block font-bold mb-1">PO (*)</label><input name="po" value={formData.po} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
+            <div><label className="block font-bold mb-1">Customer PO</label><input name="customerPO" value={formData.customerPO} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
+            <div><label className="block font-bold mb-1">Material</label><input name="material" value={formData.material} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
+            <div><label className="block font-bold mb-1">Cliente Principal</label><input name="clientePrincipal" value={formData.clientePrincipal} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
+            <div><label className="block font-bold mb-1">Descripción</label><select name="descripcion" value={formData.descripcion} onChange={handleChange} className="input-brand w-full px-3 py-2">{productDescriptions.map(desc => (<option key={desc} value={desc}>{desc}</option>))}</select></div>
             <div className="grid grid-cols-2 gap-4">
-              <div><label className="block font-medium text-gray-600 mb-1">Cajas Orden (*)</label><input type="number" name="cajasOrden" value={formData.cajasOrden} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5" /></div>
-              <div><label className="block font-medium text-gray-600 mb-1">Formato Caja (Lb)</label><input type="number" name="formatoCaja" value={formData.formatoCaja} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5" /></div>
+              <div><label className="block font-bold mb-1">Cajas</label><input type="number" name="cajasOrden" value={formData.cajasOrden} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
+              <div><label className="block font-bold mb-1">Formato (Lb)</label><input type="number" name="formatoCaja" value={formData.formatoCaja} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
             </div>
-            <div><label className="block font-medium text-gray-600 mb-1">AWB / BL</label><input name="awb" value={formData.awb} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5" /></div>
           </div>
-          <div className="space-y-3">
-            <div>
-              <label className="block font-medium text-gray-600 mb-1">Bodega / Ubicación</label>
-              <select onChange={handleWarehouseChange} value={formData.bodega} className="w-full rounded-lg border px-3 py-1.5 bg-white">
-                {warehouses.map(wh => (<option key={wh.name} value={wh.name}>{wh.name} / {wh.location}</option>))}
-              </select>
-            </div>
+          <div className="space-y-4">
+            <div><label className="block font-bold mb-1">Bodega</label><select onChange={handleWarehouseChange} value={formData.bodega} className="input-brand w-full px-3 py-2">{warehouses.map(wh => (<option key={wh.name} value={wh.name}>{wh.name} / {wh.location}</option>))}</select></div>
             <div className="grid grid-cols-2 gap-4">
-              <div><label className="block font-medium text-gray-600 mb-1">Fecha Producción</label><input type="date" name="produccion" value={formData.produccion} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5" /></div>
-              <div><label className="block font-medium text-gray-600 mb-1">ETA</label><input type="date" name="eta" value={formData.eta} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5" /></div>
+              <div><label className="block font-bold mb-1">Prod. Date</label><input type="date" name="produccion" value={formData.produccion} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
+              <div><label className="block font-bold mb-1">ETA</label><input type="date" name="eta" value={formData.eta} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
             </div>
-            <div>
-              <label className="block font-medium text-gray-600 mb-1">Tipo de Empacado</label>
-              <select name="empacado" value={formData.empacado} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5 bg-white">
-                {productTypes.map(type => (<option key={type} value={type}>{type}</option>))}
-              </select>
-            </div>
+            <div><label className="block font-bold mb-1">Empacado</label><select name="empacado" value={formData.empacado} onChange={handleChange} className="input-brand w-full px-3 py-2">{productTypes.map(type => (<option key={type} value={type}>{type}</option>))}</select></div>
             <div className="grid grid-cols-3 gap-4">
-                <div><label className="block font-medium text-gray-600 mb-1">Sector</label><input name="sector" value={formData.sector} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5" /></div>
-                <div><label className="block font-medium text-gray-600 mb-1">Trim</label><input name="trim" value={formData.trim} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5" /></div>
-                <div><label className="block font-medium text-gray-600 mb-1">Calibre (Size)</label><input name="size" value={formData.size} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5" /></div>
+                <div><label className="block font-bold mb-1">Sector</label><input name="sector" value={formData.sector} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
+                <div><label className="block font-bold mb-1">Trim</label><input name="trim" value={formData.trim} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
+                <div><label className="block font-bold mb-1">Size</label><input name="size" value={formData.size} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
             </div>
-             <div><label className="block font-medium text-gray-600 mb-1">Escamas (Opcional)</label><input name="escamas" value={formData.escamas} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5" /></div>
-            <div><label className="block font-medium text-gray-600 mb-1">Status Inicial</label><select name="status" value={formData.status} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5 bg-white"><option value="CONFIRMADO">Confirmado</option><option value="EN_TRANSITO">En Tránsito</option></select></div>
+            <div><label className="block font-bold mb-1">Status</label><select name="status" value={formData.status} onChange={handleChange} className="input-brand w-full px-3 py-2"><option value="CONFIRMADO">Confirmado</option><option value="EN_TRANSITO">En Tránsito</option></select></div>
           </div>
         </div>
-        <div className="flex justify-end gap-2 pt-4 border-t mt-6">
-          <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl border text-sm font-medium">Cancelar</button>
-          <button type="submit" className="px-5 py-2 rounded-xl bg-sky-600 text-white text-sm font-medium">Guardar Lote</button>
+        <div className="flex justify-end gap-4 pt-6 border-t border-[#D7D2CB] mt-6">
+          <button type="button" onClick={onCancel} className="text-[#6E6259] font-bold uppercase text-xs hover:text-[#425563]">Cancelar</button>
+          <button type="submit" className="btn-primary px-6 py-2 text-xs font-bold uppercase rounded-none">Guardar Lote</button>
         </div>
       </form>
     </div>
   );
 }
 
-// --- NUEVO: FORMULARIO PARA CREAR ÓRDENES DE VENTA ---
 function NewSalesOrderForm({ onCreate, onCancel }: { onCreate: (data: Omit<SalesOrder, 'id'>) => void; onCancel: () => void; }) {
-  const [formData, setFormData] = useState<Omit<SalesOrder, 'id'>>({
-    salesRep: "Juan Pérez",
-    demandId: `DEM-${new Date().getFullYear()}-${Math.floor(Math.random() * 9000) + 1000}`,
-    tos: "FOB",
-    shipTo: "",
-    pickUpDate: new Date().toISOString().slice(0, 10),
-    brand1: "AquaChile",
-    material: "",
-    description: "",
-    cases: 0,
-    price: 0,
-    flex: "No",
-    incoterm: "FOB MIA",
-    truck: "",
-    customerPO: "",
-    portEntry: "Miami",
-    week: `W${Math.ceil((new Date().getDate() + new Date().getDay() + 1) / 7)}`,
-    estadoAprobacion: "EN REVISIÓN",
-    estadoProgreso: "PENDIENTE APROBACIÓN",
-    unidadPrecio: "USD / lb",
-    orden: `SO-${Math.floor(Math.random() * 9000) + 1000}`,
-    estadoPlanificacion: "PENDIENTE",
-    especie: "SA",
-    especieDescripcion: "Salmón Atlántico",
-    estadoDetPrecio: "PENDIENTE",
-    incoterms2: "FOB",
-    brand: "AquaChile",
-  });
+  const [formData, setFormData] = useState<Omit<SalesOrder, 'id'>>({ salesRep: "Juan Pérez", demandId: `DEM-${new Date().getFullYear()}-${Math.floor(Math.random() * 9000) + 1000}`, tos: "FOB", shipTo: "", pickUpDate: new Date().toISOString().slice(0, 10), brand1: "AquaChile", material: "", description: "", cases: 0, price: 0, flex: "No", incoterm: "FOB MIA", truck: "", customerPO: "", portEntry: "Miami", week: `W${Math.ceil((new Date().getDate() + new Date().getDay() + 1) / 7)}`, estadoAprobacion: "EN REVISIÓN", estadoProgreso: "PENDIENTE APROBACIÓN", unidadPrecio: "USD / lb", orden: "", estadoPlanificacion: "PENDIENTE", especie: "SA", especieDescripcion: "Salmón Atlántico", estadoDetPrecio: "PENDIENTE", incoterms2: "FOB", brand: "AquaChile", });
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-  };
-  
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => { setFormData(prev => ({ ...prev, [e.target.name]: e.target.value })); };
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.demandId || !formData.shipTo || !formData.customerPO) {
-      alert("Por favor, completa los campos obligatorios: Demand ID, Ship To, y Customer PO.");
+    if (!formData.demandId || !formData.shipTo || !formData.orden) return;
+    onCreate({ ...formData, cases: Number(formData.cases) || 0, price: Number(formData.price) || 0 });
+  };
+
+  return (
+    <div className="fixed inset-0 bg-[#425563]/80 flex items-center justify-center z-50 p-4">
+      <form onSubmit={handleSubmit} className="bg-white shadow-2xl max-w-4xl w-full p-8 max-h-[90vh] overflow-y-auto border-t-8 border-[#FE5000]">
+        <div className="flex items-center justify-between pb-4 border-b border-[#D7D2CB] mb-6">
+          <h2 className="text-xl font-bold text-[#425563] font-['Quicksand']">NUEVA ORDEN DE VENTA</h2>
+          <button type="button" onClick={onCancel} className="text-[#6E6259] hover:text-[#FE5000]"><X className="h-6 w-6" /></button>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm text-[#6E6259]">
+            <div className="space-y-4">
+              <div><label className="block font-bold mb-1">Demand ID</label><input name="demandId" value={formData.demandId} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
+              <div><label className="block font-bold mb-1">Ship To</label><input name="shipTo" value={formData.shipTo} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
+              <div><label className="block font-bold mb-1">Customer PO</label><input name="customerPO" value={formData.customerPO} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
+              <div><label className="block font-bold mb-1">Material</label><input name="material" value={formData.material} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
+            </div>
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                 <div><label className="block font-bold mb-1">Cases</label><input type="number" name="cases" value={formData.cases} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
+                 <div><label className="block font-bold mb-1">Price</label><input type="number" step="0.01" name="price" value={formData.price} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
+              </div>
+              <div><label className="block font-bold mb-1">Pick up Date</label><input type="date" name="pickUpDate" value={formData.pickUpDate} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
+              <div><label className="block font-bold mb-1">Approval</label><select name="estadoAprobacion" value={formData.estadoAprobacion} onChange={handleChange} className="input-brand w-full px-3 py-2"><option>EN REVISIÓN</option><option>APROBADA</option></select></div>
+            </div>
+            <div className="space-y-4">
+              <div><label className="block font-bold mb-1">Incoterm</label><input name="incoterm" value={formData.incoterm} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
+              <div><label className="block font-bold mb-1">Port</label><input name="portEntry" value={formData.portEntry} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
+              <div><label className="block font-bold mb-1">Sales Order #</label><input name="orden" value={formData.orden} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
+            </div>
+        </div>
+        <div className="flex justify-end gap-4 pt-6 border-t border-[#D7D2CB] mt-6">
+          <button type="button" onClick={onCancel} className="text-[#6E6259] font-bold uppercase text-xs hover:text-[#425563]">Cancelar</button>
+          <button type="submit" className="btn-primary px-6 py-2 text-xs font-bold uppercase rounded-none">Guardar Orden</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function AssignmentForm({ mode, inventory, salesOrders, onCreate, onCancel }: { mode: AssignmentTipo; inventory: InventoryRow[]; salesOrders: SalesOrder[]; onCreate: (data: { tipo: AssignmentTipo; salesOrderId?: string; spotCliente?: string; spotRef?: string; items: OrderItem[] }) => void; onCancel: () => void; }) {
+  const [selectedSalesOrder, setSelectedSalesOrder] = useState<string>(salesOrders[0]?.id ?? "");
+  const [spotCliente, setSpotCliente] = useState(inventory[0]?.clientePrincipal ?? "");
+  const [spotRef, setSpotRef] = useState("");
+  const [quantities, setQuantities] = useState<Record<string, number>>(() => Object.fromEntries(inventory.map(row => [row.id, 0])));
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setQuantities(Object.fromEntries(inventory.map(row => [row.id, 0])));
+    if (mode === "ORDEN" && salesOrders.length > 0) {
+      setSelectedSalesOrder(salesOrders[0].id);
+    }
+    if (mode === "SPOT") {
+      setSpotCliente(inventory[0]?.clientePrincipal ?? "");
+    }
+    setSpotRef("");
+    setError("");
+  }, [inventory, mode, salesOrders]);
+
+  const handleQtyChange = (inventoryId: string, value: number) => {
+    const invRow = inventory.find(r => r.id === inventoryId);
+    const maxValue = invRow ? invRow.cajasInv : 0;
+    const safeValue = clamp(Number.isNaN(value) ? 0 : value, 0, maxValue);
+    setQuantities(prev => ({ ...prev, [inventoryId]: safeValue }));
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const payloadItems = Object.entries(quantities)
+      .filter(([, qty]) => qty > 0)
+      .map(([inventoryId, qty]) => {
+        const invRow = inventory.find(r => r.id === inventoryId);
+        if (!invRow) return null;
+        return {
+          inventoryId,
+          po: invRow.po,
+          material: invRow.material,
+          producto: invRow.producto,
+          cajas: qty,
+        };
+      })
+      .filter((item): item is OrderItem => Boolean(item));
+
+    if (!payloadItems.length) {
+      setError("Selecciona al menos un lote con cajas asignadas.");
       return;
     }
+
+    if (mode === "ORDEN" && !selectedSalesOrder) {
+      setError("Selecciona la orden de venta que deseas asignar.");
+      return;
+    }
+
+    if (mode === "SPOT" && (!spotCliente || !spotRef)) {
+      setError("Completa los datos de la venta spot.");
+      return;
+    }
+
     onCreate({
-      ...formData,
-      cases: Number(formData.cases) || 0,
-      price: Number(formData.price) || 0,
+      tipo: mode,
+      salesOrderId: mode === "ORDEN" ? selectedSalesOrder : undefined,
+      spotCliente: mode === "SPOT" ? spotCliente : undefined,
+      spotRef: mode === "SPOT" ? spotRef : undefined,
+      items: payloadItems,
     });
   };
 
   return (
-    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
-      <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-xl max-w-4xl w-full p-6 max-h-[90vh] overflow-y-auto space-y-4">
-        <div className="flex items-center justify-between pb-2 border-b">
-          <h2 className="text-lg font-semibold">Crear Nueva Orden de Venta</h2>
-          <button type="button" onClick={onCancel} className="rounded-full p-1.5 hover:bg-gray-100"><X className="h-4 w-4" /></button>
-        </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4 text-xs">
-            <div className="space-y-3">
-              <div><label className="block font-medium text-gray-600 mb-1">Demand ID (*)</label><input name="demandId" value={formData.demandId} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5" /></div>
-              <div><label className="block font-medium text-gray-600 mb-1">Ship To (*)</label><input name="shipTo" value={formData.shipTo} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5" /></div>
-              <div><label className="block font-medium text-gray-600 mb-1">Customer PO (*)</label><input name="customerPO" value={formData.customerPO} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5" /></div>
-              <div><label className="block font-medium text-gray-600 mb-1">Material</label><input name="material" value={formData.material} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5" /></div>
-              <div><label className="block font-medium text-gray-600 mb-1">Description</label><input name="description" value={formData.description} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5" /></div>
-            </div>
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-4">
-                 <div><label className="block font-medium text-gray-600 mb-1">Cases</label><input type="number" name="cases" value={formData.cases} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5" /></div>
-                 <div><label className="block font-medium text-gray-600 mb-1">Price</label><input type="number" step="0.01" name="price" value={formData.price} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5" /></div>
-              </div>
-              <div><label className="block font-medium text-gray-600 mb-1">Pick up Date</label><input type="date" name="pickUpDate" value={formData.pickUpDate} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5" /></div>
-              <div><label className="block font-medium text-gray-600 mb-1">Sales Rep</label><input name="salesRep" value={formData.salesRep} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5" /></div>
-              <div><label className="block font-medium text-gray-600 mb-1">Estado Aprobación</label>
-                <select name="estadoAprobacion" value={formData.estadoAprobacion} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5 bg-white">
-                  <option>EN REVISIÓN</option>
-                  <option>APROBADA</option>
-                  <option>RECHAZADA</option>
-                </select>
-              </div>
-               <div><label className="block font-medium text-gray-600 mb-1">Estado Progreso</label>
-                <select name="estadoProgreso" value={formData.estadoProgreso} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5 bg-white">
-                  <option>PENDIENTE APROBACIÓN</option>
-                  <option>PENDIENTE ASIGNACIÓN</option>
-                  <option>ASIGNADA</option>
-                  <option>COMPLETADA</option>
-                </select>
-              </div>
-            </div>
-            <div className="space-y-3">
-              <div><label className="block font-medium text-gray-600 mb-1">Incoterm</label><input name="incoterm" value={formData.incoterm} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5" /></div>
-              <div><label className="block font-medium text-gray-600 mb-1">Port of Entry</label><input name="portEntry" value={formData.portEntry} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5" /></div>
-              <div><label className="block font-medium text-gray-600 mb-1">Truck</label><input name="truck" value={formData.truck} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5" /></div>
-              <div><label className="block font-medium text-gray-600 mb-1">Brand</label><input name="brand" value={formData.brand} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5" /></div>
-              <div><label className="block font-medium text-gray-600 mb-1">Sales Order #</label><input name="orden" value={formData.orden} onChange={handleChange} className="w-full rounded-lg border px-3 py-1.5" /></div>
-            </div>
+    <div className="fixed inset-0 bg-[#425563]/80 flex items-center justify-center z-50 p-4">
+      <form onSubmit={handleSubmit} className="bg-white shadow-2xl max-w-4xl w-full p-8 max-h-[90vh] overflow-y-auto border-t-8 border-[#FE5000]">
+        <div className="flex items-center justify-between pb-4 border-b border-[#D7D2CB] mb-6">
+          <div>
+            <h2 className="text-xl font-bold text-[#425563] font-['Quicksand']">{mode === "ORDEN" ? "Asignar Orden de Venta" : "Crear Venta Spot"}</h2>
+            <p className="text-xs text-[#6E6259] uppercase tracking-wider">{mode === "ORDEN" ? "Selecciona la orden y define los lotes" : "Define cliente, referencia y asigna lotes"}</p>
+          </div>
+          <button type="button" onClick={onCancel} className="text-[#6E6259] hover:text-[#FE5000]"><X className="h-6 w-6" /></button>
         </div>
 
-        <div className="flex justify-end gap-2 pt-4 border-t mt-6">
-          <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl border text-sm font-medium">Cancelar</button>
-          <button type="submit" className="px-5 py-2 rounded-xl bg-sky-600 text-white text-sm font-medium">Guardar Orden</button>
+        {error && <div className="mb-4 text-xs font-bold text-red-600 bg-red-50 border border-red-200 px-3 py-2">{error}</div>}
+
+        {mode === "ORDEN" ? (
+          <div className="mb-6">
+            <label className="block text-xs font-bold uppercase text-[#6E6259] mb-2">Orden de Venta</label>
+            <select value={selectedSalesOrder} onChange={(e) => setSelectedSalesOrder(e.target.value)} className="input-brand w-full px-3 py-2">
+              <option value="">Selecciona una orden</option>
+              {salesOrders.map(order => (
+                <option key={order.id} value={order.id}>
+                  {order.demandId} · {order.shipTo} · {order.customerPO}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <div className="grid md:grid-cols-2 gap-4 mb-6">
+            <div>
+              <label className="block text-xs font-bold uppercase text-[#6E6259] mb-2">Cliente</label>
+              <input value={spotCliente} onChange={(e) => setSpotCliente(e.target.value)} className="input-brand w-full px-3 py-2" placeholder="Nombre del cliente" />
+            </div>
+            <div>
+              <label className="block text-xs font-bold uppercase text-[#6E6259] mb-2">Referencia</label>
+              <input value={spotRef} onChange={(e) => setSpotRef(e.target.value)} className="input-brand w-full px-3 py-2" placeholder="Referencia interna" />
+            </div>
+          </div>
+        )}
+
+        <div className="border border-[#D7D2CB]">
+          <div className="table-header px-4 py-3 text-left">Selecciona los lotes del inventario</div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-[#6E6259]">
+              <thead>
+                <tr className="table-header">
+                  <th className="py-3 px-4 text-left">ID</th>
+                  <th className="px-4 text-left">PO</th>
+                  <th className="px-4 text-left">Cliente</th>
+                  <th className="px-4 text-left">Material</th>
+                  <th className="px-4 text-left">Bodega</th>
+                  <th className="px-4 text-right">Stock</th>
+                  <th className="px-4 text-right">Asignar</th>
+                </tr>
+              </thead>
+              <tbody className="font-['Merriweather']">
+                {inventory.map(row => (
+                  <tr key={row.id} className="border-b border-[#F0EFE9]">
+                    <td className="py-3 px-4 font-bold text-[#425563]">{row.customId || row.id}</td>
+                    <td className="px-4">{row.po}</td>
+                    <td className="px-4">{row.clientePrincipal}</td>
+                    <td className="px-4">{row.material}</td>
+                    <td className="px-4">{row.bodega}</td>
+                    <td className="px-4 text-right font-bold">{row.cajasInv.toLocaleString()}</td>
+                    <td className="px-4 text-right">
+                      <input
+                        type="number"
+                        min={0}
+                        max={row.cajasInv}
+                        value={quantities[row.id] ?? 0}
+                        onChange={(e) => handleQtyChange(row.id, Number(e.target.value))}
+                        className="input-brand w-24 px-2 py-1 text-right"
+                      />
+                    </td>
+                  </tr>
+                ))}
+                {inventory.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="text-center text-[#D7D2CB] py-6 italic">No hay inventario disponible.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-4 pt-6 border-t border-[#D7D2CB] mt-6">
+          <button type="button" onClick={onCancel} className="text-[#6E6259] font-bold uppercase text-xs hover:text-[#425563]">Cancelar</button>
+          <button type="submit" className="btn-primary px-6 py-2 text-xs font-bold uppercase rounded-none flex items-center gap-2">
+            <ClipboardList className="h-4 w-4" />
+            Confirmar
+          </button>
         </div>
       </form>
     </div>
   );
 }
-// --- FIN DE BLOQUE NUEVO ---
 
-function AssignmentForm({ mode, inventory, salesOrders, onCreate, onCancel }: { mode: AssignmentTipo; inventory: InventoryRow[]; salesOrders: SalesOrder[]; onCreate: (data: { tipo: AssignmentTipo; salesOrderId?: string; spotCliente?: string; spotRef?: string; items: OrderItem[]; }) => void; onCancel: () => void; }) {
-  const [salesOrderId, setSalesOrderId] = useState(salesOrders[0]?.id ?? "");
-  const [spotCliente, setSpotCliente] = useState("");
-  const [spotRef, setSpotRef] = useState("");
-  const [items, setItems] = useState<OrderItem[]>([{ inventoryId: inventory[0]?.id ?? "", po: inventory[0]?.po ?? "", material: inventory[0]?.material ?? "", producto: inventory[0]?.producto ?? "", cajas: 0, }]);
-  const handleAddLine = () => { if (inventory[0]) setItems(prev => [...prev, { inventoryId: inventory[0].id, po: inventory[0].po, material: inventory[0].material, producto: inventory[0].producto, cajas: 0 }]); };
-  const handleRemoveLine = (idx: number) => setItems(prev => prev.filter((_, i) => i !== idx));
-  const handleChangeInventory = (idx: number, id: string) => { const row = inventory.find(r => r.id === id); if (row) setItems(prev => prev.map((it, i) => i === idx ? { ...it, inventoryId: row.id, po: row.po, material: row.material, producto: row.producto } : it)); };
-  const handleChangeCajas = (idx: number, value: number) => { const max = inventory.find(r => r.id === items[idx].inventoryId)?.cajasInv ?? 0; setItems(prev => prev.map((it, i) => i === idx ? { ...it, cajas: clamp(value, 0, max) } : it)); };
-  const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); const cleanItems = items.filter(i => i.cajas > 0); if (cleanItems.length === 0) return; if (mode === 'ORDEN') { if (!salesOrderId) return; onCreate({ tipo: 'ORDEN', salesOrderId, items: cleanItems }); } else { if (!spotCliente.trim()) { alert("Ingresa el cliente."); return; } onCreate({ tipo: 'SPOT', spotCliente: spotCliente.trim(), spotRef: spotRef.trim() || undefined, items: cleanItems }); } };
-  const totalCajas = items.reduce((s, i) => s + i.cajas, 0);
-  const totalLbs = items.reduce((s, i) => s + (i.cajas * (inventory.find(r => r.id === i.inventoryId)?.formatoCaja ?? 0)), 0);
-  return (
-    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl max-w-3xl w-full p-6 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-4"><h2 className="text-lg font-semibold">{mode === 'ORDEN' ? 'Nueva Asignación de Inventario' : 'Nueva Venta Spot'}</h2><button type="button" onClick={onCancel} className="rounded-full p-1.5 hover:bg-gray-100"><X className="h-4 w-4" /></button></div>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {mode === 'ORDEN' ? (<div className="space-y-1"><label className="text-xs font-medium">Orden de Venta</label><select value={salesOrderId} onChange={e => setSalesOrderId(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-xs bg-white">{salesOrders.map(s => <option key={s.id} value={s.id}>{s.demandId} • {s.shipTo} • {s.cases} cs</option>)}</select></div>) : (
-            <div className="grid sm:grid-cols-2 gap-2">
-              <div className="space-y-1"><label className="text-xs font-medium">Cliente Spot</label><input value={spotCliente} onChange={e => setSpotCliente(e.target.value)} className="w-full rounded-lg border px-3 py-1.5 text-xs" /></div>
-              <div className="space-y-1"><label className="text-xs font-medium">Referencia Spot</label><input value={spotRef} onChange={e => setSpotRef(e.target.value)} className="w-full rounded-lg border px-3 py-1.5 text-xs" /></div>
-            </div>
-          )}
-          <div className="space-y-2 pt-2">
-            <div className="flex justify-between items-center"><span className="text-xs font-medium">Líneas de Inventario</span><button type="button" onClick={handleAddLine} className="text-xs text-sky-700 font-medium">Agregar Línea</button></div>
-            {items.map((item, idx) => (
-              <div key={idx} className="grid grid-cols-[3fr_1fr_auto] gap-2 items-center p-2 bg-gray-50 rounded-lg">
-                <select value={item.inventoryId} onChange={e => handleChangeInventory(idx, e.target.value)} className="rounded-lg border px-2 py-1.5 text-xs bg-white">{inventory.map(r => <option key={r.id} value={r.id}>{r.po} • {r.producto} ({r.cajasInv} cs disp.)</option>)}</select>
-                <input type="number" placeholder="Cajas" value={item.cajas > 0 ? item.cajas : ""} onChange={e => handleChangeCajas(idx, Number(e.target.value) || 0)} className="rounded-lg border px-2 py-1.5 text-xs" />
-                <button type="button" onClick={() => handleRemoveLine(idx)} disabled={items.length === 1} className="text-xs text-red-500 disabled:opacity-50 font-medium">Quitar</button>
-              </div>
-            ))}
-          </div>
-          <div className="text-xs font-medium pt-2">Total a Asignar: <strong>{totalCajas}</strong> cajas / <strong>{totalLbs.toLocaleString()}</strong> lbs</div>
-          <div className="flex justify-end gap-2 pt-4"><button type="button" onClick={onCancel} className="px-3 py-1.5 rounded-xl border text-sm">Cancelar</button><button type="submit" className="px-4 py-1.5 rounded-xl bg-sky-600 text-white text-sm font-medium">Crear Asignación</button></div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-function ClientTrackingView({ inventoryRow, assignments, salesOrder }: { inventoryRow: InventoryRow, assignments: Assignment[], salesOrder?: SalesOrder }) {
-  const TRACK_STEPS: { id: TrackingStatus; label: string }[] = [ { id: "CONFIRMADO", label: "Confirmed" }, { id: "EN_TRANSITO", label: "In Transit" }, { id: "LISTO_ENTREGA", label: "Ready for Delivery" }, { id: "ENTREGADO", label: "Delivered" }];
+function ClientTrackingView({ inventoryRow, assignments, salesOrder, salesOrders = [] }: { inventoryRow: InventoryRow, assignments: Assignment[], salesOrder?: SalesOrder, salesOrders?: SalesOrder[] }) {
+  const TRACK_STEPS: { id: TrackingStatus; label: string }[] = [
+    { id: "CONFIRMADO", label: "Confirmed" },
+    { id: "EN_TRANSITO", label: "In Transit" },
+    { id: "LISTO_ENTREGA", label: "Ready for Delivery" },
+    { id: "ENTREGADO", label: "Delivered" },
+  ];
   const currentStatusIdx = Math.max(0, TRACK_STEPS.findIndex(step => step.id === inventoryRow.status));
-  const assignedItemsInThisLot = assignments.flatMap(a => a.items.filter(item => item.inventoryId === inventoryRow.id));
-  const formatDateTime = (iso?: string) => iso ? new Date(iso).toLocaleString('en-US') : '-';
+  const formatDateTime = (iso?: string) =>
+    iso ? new Date(iso).toLocaleString("en-US", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
+
+  const orderMap = useMemo(() => new Map(salesOrders.map(order => [order.id, order])), [salesOrders]);
+
+  const assignedItemDetails = assignments.flatMap(asg =>
+    asg.items
+      .filter(item => item.inventoryId === inventoryRow.id)
+      .map(item => {
+        const linkedOrder = asg.salesOrderId ? orderMap.get(asg.salesOrderId) : undefined;
+        return {
+          allocationId: asg.id,
+          productionDate: inventoryRow.produccion,
+          specification: inventoryRow.descripcion,
+          cases: item.cajas,
+          lbs: item.cajas * inventoryRow.formatoCaja,
+          po: inventoryRow.po,
+          id: inventoryRow.customId || inventoryRow.id,
+          requestEta: linkedOrder?.pickUpDate || inventoryRow.eta,
+          awb: inventoryRow.awb || "Pending",
+          location: inventoryRow.ubicacion,
+          salesOrder: linkedOrder?.demandId || linkedOrder?.orden || asg.spotRef || "Spot Sale",
+        };
+      })
+  );
+
+  const totalCasesAssigned = assignedItemDetails.reduce((sum, item) => sum + item.cases, 0);
+  const totalLbsAssigned = assignedItemDetails.reduce((sum, item) => sum + item.lbs, 0);
+
+  const orderSummary = [
+    { label: "Customer PO", value: inventoryRow.customerPO },
+    { label: "Sales Order", value: salesOrder?.demandId ?? "Pending" },
+    { label: "Incoterm", value: salesOrder?.incoterm ?? "—" },
+    { label: "ETA", value: inventoryRow.eta },
+  ];
+
+  const allocationSummary = [
+    { label: "AquaChile Lot", value: inventoryRow.po },
+    { label: "Warehouse", value: inventoryRow.bodega },
+    { label: "Location", value: inventoryRow.ubicacion },
+    { label: "Production", value: inventoryRow.produccion },
+    { label: "Request ETA", value: salesOrder?.pickUpDate ?? "—" },
+    { label: "AWB", value: inventoryRow.awb ?? "Pending" },
+  ];
+
+  const salmonBackground = {
+    backgroundColor: "#1a1410",
+    backgroundImage: `
+      radial-gradient(circle at 30% 35%, rgba(255, 131, 92, 0.75) 0%, rgba(255, 131, 92, 0.15) 28%, transparent 52%),
+      radial-gradient(circle at 70% 40%, rgba(255, 104, 60, 0.65) 0%, rgba(255, 104, 60, 0.1) 26%, transparent 55%),
+      radial-gradient(circle at 25% 70%, rgba(255, 187, 146, 0.35) 0%, rgba(255, 187, 146, 0.05) 28%, transparent 60%),
+      radial-gradient(circle at 65% 75%, rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0.02) 25%, transparent 55%),
+      linear-gradient(160deg, rgba(26, 18, 12, 0.95) 0%, rgba(51, 34, 23, 0.95) 45%, rgba(26, 18, 12, 0.92) 100%),
+      repeating-linear-gradient(140deg, rgba(43, 29, 20, 0.85) 0px, rgba(43, 29, 20, 0.85) 8px, rgba(23, 14, 10, 0.95) 8px, rgba(23, 14, 10, 0.95) 20px)
+    `,
+    backgroundSize: "cover",
+  };
 
   return (
-    <div className="min-h-screen bg-slate-100 p-4 sm:p-8 flex items-center justify-center">
-      <div className="w-full max-w-4xl bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-200">
-        <div className="p-6 bg-slate-900 text-white flex items-center justify-between flex-wrap">
+    <div className="min-h-screen p-4 sm:p-8 flex items-center justify-center font-['Merriweather']" style={salmonBackground}>
+      <div className="w-full max-w-5xl bg-white shadow-xl overflow-hidden border-t-8 border-[#FE5000]">
+        <div className="p-6 lg:p-8 bg-[#425563] text-white flex items-center justify-between flex-wrap gap-4">
           <div className="flex items-center gap-4">
-            <img src="/aquachile_logo.png" alt="AquaChile" className="h-8 object-contain" />
-            <div><div className="text-xs uppercase tracking-wide text-slate-300">Order Tracking</div><h1 className="text-lg font-semibold">{inventoryRow.clientePrincipal}</h1></div>
+            <img src="/aquachile_logo.png" alt="AquaChile Logo" className="h-8 object-contain" />
+            <div className="h-8 w-px bg-white/30 mx-2" />
+            <div>
+              <div className="text-[10px] uppercase tracking-widest text-[#D7D2CB] font-['Quicksand']">Customer Name</div>
+              <h1 className="text-xl font-bold font-['Quicksand']">{(inventoryRow.clientePrincipal || "").toUpperCase()}</h1>
+            </div>
           </div>
-          <div className="text-right mt-2 sm:mt-0"><span className="text-xs text-slate-300">Current Status</span><div className="mt-1"><Badge text={inventoryRow.status} /></div></div>
+          <div className="text-right">
+            <span className="text-[10px] uppercase tracking-widest text-[#D7D2CB] font-['Quicksand']">Current Status</span>
+            <div className="mt-1">
+              <Badge text={inventoryRow.status} />
+            </div>
+          </div>
         </div>
-        <div className="p-6">
-          <div className="relative mb-8 pt-8">
-            <div className="absolute top-4 left-0 w-full h-0.5 bg-gray-200"></div>
-            <div className="absolute top-4 left-0 h-0.5 bg-sky-500 transition-all duration-500" style={{ width: `${(currentStatusIdx / (TRACK_STEPS.length - 1)) * 100}%` }}></div>
-            <div className="flex justify-between items-start">
+
+        <div className="p-6 lg:p-12">
+          <div className="relative mb-8 pt-4 px-4">
+            <div className="absolute top-7 left-0 w-full h-0.5 bg-[#D7D2CB]" />
+            <div
+              className="absolute top-7 left-0 h-0.5 bg-[#FE5000] transition-all duration-1000 ease-out"
+              style={{ width: `${(currentStatusIdx / (TRACK_STEPS.length - 1)) * 100}%` }}
+            />
+            <div className="flex justify-between items-start relative">
               {TRACK_STEPS.map((step, idx) => (
-                <div key={step.id} className="relative z-10 flex flex-col items-center w-1/4">
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs border-2 ${idx <= currentStatusIdx ? 'bg-sky-500 border-sky-600 text-white' : 'bg-white border-gray-300 text-gray-400'}`}>{idx <= currentStatusIdx ? '✓' : idx + 1}</div>
-                  <span className="text-[10px] mt-2 text-center font-medium text-gray-600">{step.label}</span>
+                <div key={step.id} className="flex flex-col items-center w-32">
+                  <div
+                    className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold z-10 transition-colors duration-500 ${
+                      idx <= currentStatusIdx ? "bg-[#FE5000] text-white" : "bg-[#F9F8F6] border-2 border-[#D7D2CB] text-[#D7D2CB]"
+                    }`}
+                  >
+                    {idx <= currentStatusIdx ? "✓" : idx + 1}
+                  </div>
+                  <span
+                    className={`text-[10px] mt-3 text-center font-['Quicksand'] font-bold uppercase tracking-wider ${
+                      idx <= currentStatusIdx ? "text-[#425563]" : "text-[#D7D2CB]"
+                    }`}
+                  >
+                    {step.label}
+                  </span>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs border-t pt-4">
-            <div><div className="text-slate-500">PO</div><div className="font-semibold text-slate-900 font-mono">{inventoryRow.customerPO}</div></div>
-            <div><div className="text-slate-500">Aquachile Lot</div><div className="font-semibold text-slate-900 font-mono">{inventoryRow.po}</div></div>
-            <div><div className="text-slate-500">Request ETA</div><div className="font-semibold text-slate-900">{salesOrder?.pickUpDate || '-'}</div></div>
-            <div><div className="text-slate-500">Location</div><div className="font-semibold text-slate-900">{inventoryRow.ubicacion}</div></div>
-            <div><div className="text-slate-500">Product or Sector</div><div className="font-semibold text-slate-900">{inventoryRow.producto} ({inventoryRow.sector})</div></div>
-            <div><div className="text-slate-500">Quantity Ordered</div><div className="font-semibold text-slate-900">{salesOrder?.cases || '-'}</div></div>
-            <div><div className="text-slate-500">Specification Ordered</div><div className="font-semibold text-slate-900">{salesOrder?.description || '-'}</div></div>
-            <div><div className="text-slate-500">Quantity Received</div><div className="font-semibold text-slate-900">{inventoryRow.cajasInv}</div></div>
-            <div><div className="text-slate-500">Specification Received</div><div className="font-semibold text-slate-900">{inventoryRow.descripcion}</div></div>
-            <div><div className="text-slate-500">Product Date</div><div className="font-semibold text-slate-900">{inventoryRow.produccion}</div></div>
-            <div><div className="text-slate-500">AWB</div><div className="font-semibold text-slate-900 font-mono">{inventoryRow.awb || '-'}</div></div>
-            <div><div className="text-slate-500">ETA</div><div className="font-semibold text-slate-900">{inventoryRow.eta}</div></div>
-            <div><div className="text-slate-500">Sales Order</div><div className="font-semibold text-slate-900 font-mono">{salesOrder?.orden || '-'}</div></div>
-          </div>
-          
-          <h3 className="font-semibold mt-6 mb-2 text-sm">Allocated Cases Detail</h3>
-          <div className="overflow-x-auto rounded-lg border">
-            <table className="w-full text-[11px]">
-              <thead className="bg-slate-50"><tr className="text-left text-slate-500"><th className="py-2 px-2">Allocation ID</th><th className="px-2">End Customer</th><th className="px-2 text-right">Cases</th></tr></thead>
-              <tbody>
-                {assignedItemsInThisLot.map((item, idx) => {
-                  const assignment = assignments.find(a => a.items.includes(item));
-                  return (<tr key={idx} className="border-b last:border-0"><td className="py-2 px-2 font-mono">{assignment?.id}</td><td className="px-2">{assignment?.cliente}</td><td className="px-2 text-right font-semibold">{item.cajas}</td></tr>);
-                })}
-                 {assignedItemsInThisLot.length === 0 && (<tr><td colSpan={3} className="text-center text-gray-400 py-3">No cases allocated from this lot yet.</td></tr>)}
-              </tbody>
-            </table>
+          <div className="grid md:grid-cols-2 gap-6">
+            <div className="border border-[#D7D2CB] bg-white shadow-sm p-6">
+              <h3 className="text-xs sm:text-sm font-bold uppercase font-['Quicksand'] text-[#1f2a37] tracking-wide mb-4">Order Overview</h3>
+              <dl className="space-y-3 text-sm text-[#253540]">
+                {orderSummary.map(item => (
+                  <div key={item.label} className="flex justify-between items-center gap-4 pb-2 border-b border-[#EEF2F6] last:border-0 last:pb-0">
+                    <dt className="font-bold uppercase tracking-wider text-[#6E7785] text-[11px]">{item.label}</dt>
+                    <dd className="text-right font-semibold text-[#101828]">{item.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+            <div className="border border-[#D7D2CB] bg-white shadow-sm p-6">
+              <h3 className="text-xs sm:text-sm font-bold uppercase font-['Quicksand'] text-[#1f2a37] tracking-wide mb-4">Allocation Overview</h3>
+              <dl className="space-y-3 text-sm text-[#253540]">
+                {allocationSummary.map(item => (
+                  <div key={item.label} className="flex justify-between items-center gap-4 pb-2 border-b border-[#EEF2F6] last:border-0 last:pb-0">
+                    <dt className="font-bold uppercase tracking-wider text-[#6E7785] text-[11px]">{item.label}</dt>
+                    <dd className="text-right font-semibold text-[#101828]">{item.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
           </div>
 
-          <h3 className="font-semibold mt-6 mb-2 text-sm">Shipment History</h3>
-          <ul className="space-y-2 text-sm text-gray-600 border-t pt-3">
-            {inventoryRow.statusHistory.slice().reverse().map((h, i) => (
-              <li key={i} className="flex items-center gap-3"><span className="font-medium text-gray-800 w-44">{formatDateTime(h.at)}</span><Badge text={h.status} /></li>
-            ))}
-          </ul>
+          <div className="mt-10">
+            <h3 className="text-sm font-bold text-[#425563] font-['Quicksand'] uppercase border-b border-[#FE5000] pb-2 inline-block mb-4">
+              Allocated Cases Detail
+            </h3>
+            <div className="overflow-x-auto border border-[#D7D2CB]">
+              <table className="w-full text-xs text-[#6E6259]">
+                <thead className="bg-[#F0EFE9] font-['Quicksand'] font-bold text-[#425563]">
+                  <tr className="text-left">
+                    <th className="py-3 px-4">PO</th>
+                    <th className="px-4">Prod. Date</th>
+                    <th className="px-4">Specification</th>
+                    <th className="px-4 text-right">Cases</th>
+                    <th className="px-4 text-right">Lb</th>
+                    <th className="px-4">ID</th>
+                    <th className="px-4">Request ETA</th>
+                    <th className="px-4">AWB</th>
+                    <th className="px-4">Location</th>
+                    <th className="px-4">Sales Order</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {assignedItemDetails.map(detail => (
+                    <tr key={`${detail.allocationId}-${detail.po}-${detail.id}`} className="border-b border-[#F0EFE9] last:border-0">
+                      <td className="py-3 px-4 font-bold text-[#425563]">{detail.po}</td>
+                      <td className="px-4">{detail.productionDate}</td>
+                      <td className="px-4 truncate" title={detail.specification}>
+                        {detail.specification}
+                      </td>
+                      <td className="px-4 text-right font-bold">{detail.cases.toLocaleString()}</td>
+                      <td className="px-4 text-right font-bold">{detail.lbs.toLocaleString()}</td>
+                      <td className="px-4">{detail.id}</td>
+                      <td className="px-4">{detail.requestEta}</td>
+                      <td className="px-4">{detail.awb}</td>
+                      <td className="px-4">{detail.location}</td>
+                      <td className="px-4">{detail.salesOrder}</td>
+                    </tr>
+                  ))}
+                  {assignedItemDetails.length === 0 && (
+                    <tr>
+                      <td colSpan={10} className="text-center text-[#D7D2CB] py-4 italic">
+                        No cases allocated from this lot yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="mt-4 flex justify-end">
+              <table className="text-xs font-['Quicksand'] uppercase tracking-wider border border-[#D7D2CB] bg-white shadow-sm">
+                <tbody>
+                  <tr>
+                    <td className="px-4 py-2 text-[#6E6259] font-bold border-b border-[#D7D2CB]">Total Cases Allocated</td>
+                    <td className="px-4 py-2 text-[#1F2A37] font-extrabold border-b border-[#D7D2CB]">{totalCasesAssigned.toLocaleString()}</td>
+                  </tr>
+                  <tr>
+                    <td className="px-4 py-2 text-[#6E6259] font-bold">Total Pounds Allocated</td>
+                    <td className="px-4 py-2 text-[#1F2A37] font-extrabold">{totalLbsAssigned.toLocaleString()}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="mt-10">
+            <h3 className="text-sm font-bold text-[#425563] font-['Quicksand'] uppercase border-b border-[#FE5000] pb-2 inline-block mb-4">History</h3>
+            <ul className="space-y-3 text-xs text-[#6E6259]">
+              {inventoryRow.statusHistory
+                .slice()
+                .reverse()
+                .map((h, i) => (
+                  <li key={i} className="flex items-center gap-4 pb-2 border-b border-[#F0EFE9] last:border-0">
+                    <span className="font-bold text-[#425563] w-44">{formatDateTime(h.at)}</span>
+                    <Badge text={h.status} />
+                  </li>
+                ))}
+            </ul>
+          </div>
+
+          <div className="mt-10 border border-[#D7D2CB] bg-[#F9F8F6] p-6 text-xs text-[#6E6259]">
+            <h3 className="text-sm font-bold text-[#425563] font-['Quicksand'] uppercase mb-3">Need help with this shipment?</h3>
+            <p>If you notice any inconsistency, please contact your AquaChile sales agent directly so we can review the allocation details with you.</p>
+          </div>
         </div>
       </div>
     </div>
