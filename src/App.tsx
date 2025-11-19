@@ -190,6 +190,7 @@ interface Assignment {
 }
 
 type StoredAssignment = Omit<Assignment, "items"> & { items?: OrderItem[] };
+type CombinedTrackingLink = { token: string; inventoryIds: string[]; cliente: string; createdAt: string };
 
 const sanitizeAssignment = (data: StoredAssignment): Assignment => ({
   ...data,
@@ -212,6 +213,7 @@ type DashboardAgg = {
 const INVENTORY_LS_KEY = "inventory_v3";
 const ASSIGNMENTS_LS_KEY = "assignments_v3";
 const SALES_ORDERS_LS_KEY = "sales_orders_v1";
+const COMBINED_LINKS_LS_KEY = "combined_links_v1";
 
 // =====================================================================
 // CONFIGURACIÓN DE NOTIFICACIONES Y DATOS
@@ -333,6 +335,32 @@ function saveAssignmentsToStorage(list: Assignment[]) {
   } catch { /* ignore */ }
 }
 
+function loadCombinedLinksFromStorage(): CombinedTrackingLink[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(COMBINED_LINKS_LS_KEY);
+    if (!raw) {
+      window.localStorage.setItem(COMBINED_LINKS_LS_KEY, JSON.stringify([]));
+      return [];
+    }
+    const parsed = JSON.parse(raw) as CombinedTrackingLink[];
+    const sanitized = parsed.filter(link => Array.isArray(link?.inventoryIds) && link.inventoryIds.length > 0 && link.token);
+    if (sanitized.length !== parsed.length) {
+      window.localStorage.setItem(COMBINED_LINKS_LS_KEY, JSON.stringify(sanitized));
+    }
+    return sanitized;
+  } catch {
+    return [];
+  }
+}
+
+function saveCombinedLinksToStorage(list: CombinedTrackingLink[]) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(COMBINED_LINKS_LS_KEY, JSON.stringify(list));
+  } catch { /* ignore */ }
+}
+
 function loadSalesOrdersFromStorage(): SalesOrder[] {
   if (typeof window === "undefined") return sampleSalesOrders;
   try {
@@ -383,11 +411,20 @@ export default function App() {
     const storedInventory = loadInventoryFromStorage();
     const storedAssignments = loadAssignmentsFromStorage();
     const storedSalesOrders = loadSalesOrdersFromStorage();
+    const storedCombinedLinks = loadCombinedLinksFromStorage();
     const invRow = storedInventory.find(i => i.trackingToken === token);
     if (invRow) {
       const relatedAssignments = storedAssignments.filter(a => getAssignmentItems(a).some(it => it.inventoryId === invRow.id));
       const relatedSalesOrder = storedSalesOrders.find(so => so.customerPO === invRow.customerPO); 
       return <ClientTrackingView inventoryRow={invRow} assignments={relatedAssignments} salesOrder={relatedSalesOrder} salesOrders={storedSalesOrders} />;
+    }
+    const combinedEntry = storedCombinedLinks.find(link => link.token === token);
+    if (combinedEntry) {
+      const rows = combinedEntry.inventoryIds.map(id => storedInventory.find(r => r.id === id)).filter((row): row is InventoryRow => Boolean(row));
+      if (rows.length > 0) {
+        const relatedAssignments = storedAssignments.filter(asg => getAssignmentItems(asg).some(item => combinedEntry.inventoryIds.includes(item.inventoryId)));
+        return <CombinedTrackingView entry={combinedEntry} rows={rows} assignments={relatedAssignments} salesOrders={storedSalesOrders} />;
+      }
     }
     return (
         <div className="flex items-center justify-center h-screen bg-[#F9F8F6]">
@@ -545,6 +582,24 @@ export default function App() {
     setShowAssignmentForm(false);
   };
 
+  const handleCreateCombinedTrackingLink = (inventoryIds: string[]): string | null => {
+    if (inventoryIds.length < 2) { alert("Selecciona al menos dos lotes para combinar."); return null; }
+    const rows = inventory.filter(r => inventoryIds.includes(r.id));
+    if (rows.length !== inventoryIds.length) { alert("No se encontraron todos los lotes seleccionados."); return null; }
+    const clientes = new Set(rows.map(r => r.clientePrincipal));
+    if (clientes.size > 1) { alert("Solo puedes combinar lotes del mismo cliente."); return null; }
+    const token = `combo-${uid()}`;
+    const entry: CombinedTrackingLink = { token, inventoryIds, cliente: rows[0].clientePrincipal, createdAt: new Date().toISOString() };
+    const existing = loadCombinedLinksFromStorage();
+    saveCombinedLinksToStorage([entry, ...existing]);
+    const origin = typeof window !== "undefined" && window.location ? window.location.origin : "";
+    const link = `${origin}/track/${token}`;
+    if (typeof window !== "undefined") {
+      window.prompt("Link combinado creado. Copia y comparte:", link);
+    }
+    return link;
+  };
+
   const handleToggleAssignmentState = (id: string, to: AssignmentEstado) => {
     const asg = assignments.find(a => a.id === id);
     if (!asg) return;
@@ -617,7 +672,7 @@ export default function App() {
           {tab === "inventory" && ( <InventoryView rows={filteredInventory} onNewPO={() => setShowNewPOForm(true)} /> )}
           {tab === "warehouse" && ( <WarehouseView inventory={inventory.filter(r => r.activo)} /> )}
           {tab === "assignments" && ( <AssignmentsView assignments={assignments} salesOrders={salesOrders} onToggleState={handleToggleAssignmentState} onNewAssignmentOrden={() => { setAssignmentMode("ORDEN"); setShowAssignmentForm(true); }} onNewAssignmentSpot={() => { setAssignmentMode("SPOT"); setShowAssignmentForm(true); }} showArchived={showArchivedAssignments} onToggleArchived={() => setShowArchivedAssignments(prev => !prev)} /> )}
-          {tab === "clientUpdate" && ( <ClientUpdateView inventory={inventory.filter(r => r.activo)} onStatusChange={handleUpdateInventoryStatus} onSendEmail={sendTrackingEmail} /> )}
+          {tab === "clientUpdate" && ( <ClientUpdateView inventory={inventory.filter(r => r.activo)} onStatusChange={handleUpdateInventoryStatus} onSendEmail={sendTrackingEmail} onCreateCombinedLink={handleCreateCombinedTrackingLink} /> )}
           {tab === 'orders' && <SalesOrdersView orders={salesOrders} onNewOrder={() => setShowNewSOForm(true)} />}
           {tab === "categories" && <CategoriesView summary={categorySummary} />}
         </main>
@@ -976,20 +1031,57 @@ function AssignmentsView({ assignments, salesOrders, onToggleState, onNewAssignm
   );
 }
 
-function ClientUpdateView({ inventory, onStatusChange, onSendEmail }: { inventory: InventoryRow[]; onStatusChange: (rowId: string, newStatus: TrackingStatus) => void; onSendEmail: (rowId: string) => void; }) {
+function ClientUpdateView({ inventory, onStatusChange, onSendEmail, onCreateCombinedLink }: { inventory: InventoryRow[]; onStatusChange: (rowId: string, newStatus: TrackingStatus) => void; onSendEmail: (rowId: string) => void; onCreateCombinedLink: (ids: string[]) => string | null; }) {
   const statusOptions: TrackingStatus[] = [ "CONFIRMADO", "EN_TRANSITO", "LISTO_ENTREGA", "ENTREGADO", "RETRASO", "INCIDENCIA", ];
+  const [selectedRows, setSelectedRows] = useState<string[]>([]);
+
+  useEffect(() => {
+    setSelectedRows(prev => prev.filter(id => inventory.some(r => r.id === id)));
+  }, [inventory]);
+
+  const toggleSelection = (id: string) => {
+    setSelectedRows(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  const canCombine = selectedRows.length >= 2;
+
+  const handleCombineClick = () => {
+    if (!canCombine) {
+      alert("Selecciona al menos dos lotes para combinar.");
+      return;
+    }
+    const selectedInventory = inventory.filter(r => selectedRows.includes(r.id));
+    const clientes = new Set(selectedInventory.map(r => r.clientePrincipal));
+    if (clientes.size > 1) {
+      alert("Solo puedes combinar lotes del mismo cliente.");
+      return;
+    }
+    const link = onCreateCombinedLink(selectedRows);
+    if (link) {
+      setSelectedRows([]);
+    }
+  };
+
   return (
     <div className="bg-white shadow-sm border border-[#D7D2CB]">
-      <div className="p-6 border-b border-[#D7D2CB]">
-        <h2 className="text-lg font-bold text-[#425563]">Tracking Control</h2>
-        <p className="text-xs text-[#6E6259] mt-1">Gestión de estado de envíos y notificación a clientes.</p>
+      <div className="p-6 border-b border-[#D7D2CB] flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+        <div>
+          <h2 className="text-lg font-bold text-[#425563]">Tracking Control</h2>
+          <p className="text-xs text-[#6E6259] mt-1">Gestión de estado de envíos y notificación a clientes.</p>
+        </div>
+        <button onClick={handleCombineClick} disabled={!canCombine} className={`px-4 py-2 text-xs font-bold uppercase tracking-wider flex items-center gap-2 border ${canCombine ? "btn-secondary border-none" : "border-[#A5A1A1] text-[#A5A1A1] cursor-not-allowed"}`}>
+          <Layers className="h-3 w-3" /> Combinar Selección
+        </button>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-xs text-[#6E6259]">
-          <thead><tr className="table-header"><th className="py-3 px-4 text-left">ID</th><th className="px-4 text-left">PO</th><th className="px-4 text-left">Cliente</th><th className="px-4 text-left">Tracking Link</th><th className="px-4 text-left">Status Actual</th><th className="px-4 text-right">Acción Status</th><th className="px-4 text-center">Notificar</th></tr></thead>
+          <thead><tr className="table-header"><th className="py-3 px-4 text-left">Select</th><th className="py-3 px-4 text-left">ID</th><th className="px-4 text-left">PO</th><th className="px-4 text-left">Cliente</th><th className="px-4 text-left">Tracking Link</th><th className="px-4 text-left">Status Actual</th><th className="px-4 text-right">Acción Status</th><th className="px-4 text-center">Notificar</th></tr></thead>
           <tbody className="font-['Merriweather']">
             {inventory.map(r => (
               <tr key={r.id} className="border-b border-[#F0EFE9] hover:bg-[#F9F8F6]">
+                <td className="py-3 px-4">
+                  <input type="checkbox" checked={selectedRows.includes(r.id)} onChange={() => toggleSelection(r.id)} className="h-4 w-4 accent-[#FE5000]" />
+                </td>
                 <td className="py-3 px-4 font-bold text-[#425563]">{r.customId || r.id}</td>
                 <td className="px-4">{r.po}</td>
                 <td className="px-4">{r.clientePrincipal}</td>
@@ -1656,6 +1748,153 @@ function ClientTrackingView({ inventoryRow, assignments, salesOrder, salesOrders
           <div className="mt-10 border border-[#D7D2CB] bg-[#F9F8F6] p-6 text-xs text-[#6E6259]">
             <h3 className="text-sm font-bold text-[#425563] font-['Quicksand'] uppercase mb-3">Need help with this shipment?</h3>
             <p>If you notice any inconsistency, please contact your AquaChile sales agent directly so we can review the allocation details with you.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CombinedTrackingView({ entry, rows, assignments, salesOrders }: { entry: CombinedTrackingLink; rows: InventoryRow[]; assignments: Assignment[]; salesOrders: SalesOrder[] }) {
+  const salmonBackground = {
+    backgroundColor: "#1a1410",
+    backgroundImage: `
+      radial-gradient(circle at 30% 35%, rgba(255, 131, 92, 0.75) 0%, rgba(255, 131, 92, 0.15) 28%, transparent 52%),
+      radial-gradient(circle at 70% 40%, rgba(255, 104, 60, 0.65) 0%, rgba(255, 104, 60, 0.1) 26%, transparent 55%),
+      radial-gradient(circle at 25% 70%, rgba(255, 187, 146, 0.35) 0%, rgba(255, 187, 146, 0.05) 28%, transparent 60%),
+      radial-gradient(circle at 65% 75%, rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0.02) 25%, transparent 55%),
+      linear-gradient(160deg, rgba(26, 18, 12, 0.95) 0%, rgba(51, 34, 23, 0.95) 45%, rgba(26, 18, 12, 0.92) 100%),
+      repeating-linear-gradient(140deg, rgba(43, 29, 20, 0.85) 0px, rgba(43, 29, 20, 0.85) 8px, rgba(23, 14, 10, 0.95) 8px, rgba(23, 14, 10, 0.95) 20px)
+    `,
+    backgroundSize: "cover",
+  };
+
+  const summary = rows.reduce(
+    (acc, row) => {
+      acc.cases += row.cajasInv;
+      acc.lbs += row.cajasInv * row.formatoCaja;
+      return acc;
+    },
+    { cases: 0, lbs: 0 }
+  );
+
+  const perRowData = rows.map(row => {
+    const rowAssignments = assignments
+      .map(asg => {
+        const matchedItems = getAssignmentItems(asg).filter(item => item.inventoryId === row.id);
+        if (!matchedItems.length) return null;
+        return { assignment: asg, items: matchedItems };
+      })
+      .filter((entry): entry is { assignment: Assignment; items: OrderItem[] } => Boolean(entry));
+    const rowCasesAssigned = rowAssignments.reduce((sum, entry) => sum + entry.items.reduce((s, item) => s + item.cajas, 0), 0);
+    const relatedSalesOrder = salesOrders.find(so => so.customerPO === row.customerPO);
+    return { row, rowAssignments, rowCasesAssigned, relatedSalesOrder };
+  });
+
+  return (
+    <div className="min-h-screen p-4 sm:p-8 flex items-center justify-center font-['Merriweather']" style={salmonBackground}>
+      <div className="w-full max-w-6xl bg-white shadow-xl overflow-hidden border-t-8 border-[#FE5000]">
+        <div className="p-6 lg:p-8 bg-[#425563] text-white flex items-center justify-between flex-wrap gap-4">
+          <div className="flex items-center gap-4">
+            <img src="/aquachile_logo.png" alt="AquaChile Logo" className="h-8 object-contain" />
+            <div className="h-8 w-px bg-white/30 mx-2"></div>
+            <div>
+              <div className="text-[10px] uppercase tracking-widest text-[#D7D2CB] font-['Quicksand']">Customer Name</div>
+              <h1 className="text-xl font-bold font-['Quicksand']">{entry.cliente.toUpperCase()}</h1>
+              <p className="text-xs text-[#D7D2CB] mt-1 tracking-wide">Combined Tracking · {rows.length} lots</p>
+            </div>
+          </div>
+          <div className="text-right">
+            <span className="text-[10px] uppercase tracking-widest text-[#D7D2CB] font-['Quicksand']">Link Created</span>
+            <div className="text-sm font-semibold">{new Date(entry.createdAt).toLocaleString()}</div>
+          </div>
+        </div>
+        <div className="p-6 lg:p-10 space-y-8">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 text-center">
+            <div className="bg-[#F9F8F6] border border-[#D7D2CB] p-4">
+              <div className="text-xs font-['Quicksand'] font-bold text-[#6E6259] uppercase tracking-wider">Lots Included</div>
+              <div className="text-3xl font-['Merriweather'] text-[#425563] mt-1">{rows.length}</div>
+            </div>
+            <div className="bg-[#F9F8F6] border border-[#D7D2CB] p-4">
+              <div className="text-xs font-['Quicksand'] font-bold text-[#6E6259] uppercase tracking-wider">Total Cases</div>
+              <div className="text-3xl font-['Merriweather'] text-[#425563] mt-1">{summary.cases.toLocaleString()}</div>
+            </div>
+            <div className="bg-[#F9F8F6] border border-[#D7D2CB] p-4">
+              <div className="text-xs font-['Quicksand'] font-bold text-[#6E6259] uppercase tracking-wider">Total Pounds</div>
+              <div className="text-3xl font-['Merriweather'] text-[#425563] mt-1">{summary.lbs.toLocaleString()}</div>
+            </div>
+          </div>
+          <div className="space-y-6">
+            {perRowData.map(({ row, rowAssignments, rowCasesAssigned, relatedSalesOrder }) => (
+              <div key={row.id} className="border border-[#D7D2CB]">
+                <div className="p-4 flex flex-wrap items-center justify-between gap-4 bg-[#F9F8F6] border-b border-[#E8E4DE]">
+                  <div>
+                    <div className="text-[10px] uppercase tracking-widest text-[#6E6259] font-['Quicksand']">AquaChile Lot</div>
+                    <div className="text-lg font-bold text-[#425563]">{row.po}</div>
+                    <div className="text-xs text-[#6E6259]">Customer PO: {row.customerPO || "—"}</div>
+                  </div>
+                  <div className="flex flex-col items-end">
+                    <span className="text-[10px] uppercase tracking-widest text-[#6E6259] font-['Quicksand']">Current Status</span>
+                    <div className="mt-1"><Badge text={row.status} /></div>
+                  </div>
+                </div>
+                <div className="p-4 grid sm:grid-cols-2 gap-4 text-xs text-[#425563]">
+                  <div>
+                    <div className="font-bold uppercase text-[#6E6259]">Location</div>
+                    <div>{row.bodega} · {row.ubicacion}</div>
+                  </div>
+                  <div>
+                    <div className="font-bold uppercase text-[#6E6259]">ETA</div>
+                    <div className="text-[#FE5000] font-semibold">{row.eta}</div>
+                  </div>
+                  <div>
+                    <div className="font-bold uppercase text-[#6E6259]">Cases Available</div>
+                    <div className="font-bold text-lg">{row.cajasInv.toLocaleString()}</div>
+                    <div className="text-[10px] text-[#6E6259]">{(row.cajasInv * row.formatoCaja).toLocaleString()} lbs</div>
+                  </div>
+                  <div>
+                    <div className="font-bold uppercase text-[#6E6259]">Sales Order</div>
+                    <div>{relatedSalesOrder?.demandId || "—"}</div>
+                  </div>
+                </div>
+                <div className="p-4 border-t border-[#E8E4DE]">
+                  <h4 className="text-sm font-bold uppercase font-['Quicksand'] text-[#425563] mb-3">Allocations</h4>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs text-[#6E6259]">
+                      <thead className="table-header">
+                        <tr>
+                          <th className="py-2 px-3 text-left">Assignment</th>
+                          <th className="px-3 text-left">Date</th>
+                          <th className="px-3 text-left">Type</th>
+                          <th className="px-3 text-right">Cases</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rowAssignments.map(({ assignment, items }) => {
+                          const cases = items.reduce((sum, item) => sum + item.cajas, 0);
+                          return (
+                            <tr key={`${assignment.id}-${row.id}`} className="border-b border-[#F0EFE9]">
+                              <td className="py-2 px-3 font-bold text-[#425563]">{assignment.id}</td>
+                              <td className="px-3">{assignment.fecha}</td>
+                              <td className="px-3"><Badge text={assignment.tipo} /></td>
+                              <td className="px-3 text-right font-bold">{cases.toLocaleString()}</td>
+                            </tr>
+                          );
+                        })}
+                        {rowAssignments.length === 0 && (
+                          <tr>
+                            <td colSpan={4} className="text-center text-[#B4AAA1] italic py-3">No hay asignaciones para este lote.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="mt-3 text-right text-[11px] uppercase text-[#425563] font-['Quicksand']">
+                    Total asignado: <strong>{rowCasesAssigned.toLocaleString()}</strong> cases
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </div>
