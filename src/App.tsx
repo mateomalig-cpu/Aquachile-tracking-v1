@@ -487,18 +487,20 @@ export default function App() {
     setShowNewSOForm(false);
   };
 
-  const handleCreateNewPO = (data: Omit<InventoryRow, 'id' | 'totalLbs' | 'cajasInv' | 'activo' | 'clientes' | 'statusHistory' | 'trackingToken' | 'fechaCierre'>) => {
+  const handleCreateNewPO = (data: Omit<InventoryRow, 'id' | 'totalLbs' | 'cajasInv' | 'activo' | 'clientes' | 'statusHistory' | 'trackingToken' | 'fechaCierre'> & { cajasDisponibles?: number }) => {
     const now = new Date().toISOString();
+    const { cajasDisponibles, ...rest } = data;
+    const cajasInv = typeof cajasDisponibles === "number" && !Number.isNaN(cajasDisponibles) ? cajasDisponibles : rest.cajasOrden;
     const newPO: InventoryRow = {
-      ...data,
+      ...rest,
       id: `row-${uid()}`,
-      customId: data.customId || "",
-      cajasInv: data.cajasOrden,
-      totalLbs: data.cajasOrden * data.formatoCaja,
-      clientes: [data.clientePrincipal],
+      customId: rest.customId || "",
+      cajasInv,
+      totalLbs: cajasInv * rest.formatoCaja,
+      clientes: [rest.clientePrincipal],
       activo: true,
       trackingToken: uid(),
-      statusHistory: [{ at: now, status: data.status }],
+      statusHistory: [{ at: now, status: rest.status }],
     };
     setInventory(prev => {
       const nextState = [newPO, ...prev];
@@ -1119,14 +1121,35 @@ function SalesOrdersView({ orders, onNewOrder }: { orders: SalesOrder[], onNewOr
   );
 }
 
-function NewPOForm({ onCreate, onCancel }: { onCreate: (data: Omit<InventoryRow, 'id' | 'totalLbs' | 'cajasInv' | 'activo' | 'clientes' | 'statusHistory' | 'trackingToken' | 'fechaCierre'>) => void; onCancel: () => void; }) {
+function NewPOForm({ onCreate, onCancel }: { onCreate: (data: Omit<InventoryRow, 'id' | 'totalLbs' | 'cajasInv' | 'activo' | 'clientes' | 'statusHistory' | 'trackingToken' | 'fechaCierre'> & { cajasDisponibles?: number }) => void; onCancel: () => void; }) {
   const warehouses = [ { name: "SUC", location: "Miami, FL" }, { name: "EVO LAX", location: "Los Angeles, CA" }, { name: "EVO DFW", location: "Dallas, TX" }, { name: "CARTYS", location: "New York, NY" }, { name: "CARTYS-RFD", location: "Rockford, IL" }, { name: "SFO-CENTRA FREIGHT", location: "San Francisco, CA" }, { name: "ARAHO", location: "Boston, MA" }, { name: "PRIME", location: "Los Angeles, CA" }, { name: "RFD-Direct", location: "Rockford, IL" }, ];
   const productTypes = ["Filetes", "Hon"];
   const productDescriptions = [ "HON 14-16 55", "R TD 2-3 10", "R TD 2-3 35", "R TD 3-4 10", "R TD 2-4 35", "R TD 3-4 SE 35", "R TD 4-5 35", "R TE 2-3 35", "R TE 3-4 35", "R TF 2-5 35", "SG TD 3-4 35", "SG TD Pr 3-4 35", "SG TD Pr 4-5 35", "TD 2-3 10", "TD 2-3 35", "TD 2-3 SE 10", "TD 2-3 SE 35", "TD 3-4 10", "TD 3-4 35", "TD 3-4 SE 10", "TD 3-4 SE 35", "TE 2-3 35", "TE 3-4 35", "TF 2-5 35" ];
 
   const [formData, setFormData] = useState({
     customId: "",
-    po: "", customerPO: "", material: "", descripcion: productDescriptions[0], producto: "", clientePrincipal: "", ubicacion: warehouses[0].location, bodega: warehouses[0].name, planta: "Magallanes", produccion: new Date().toISOString().slice(0, 10), eta: new Date().toISOString().slice(0, 10), status: "CONFIRMADO" as TrackingStatus, cajasOrden: 100, formatoCaja: 35, sector: "SA", trim: "TD", size: "4-5", escamas: "", awb: "", time: "AM", empacado: productTypes[0],
+    po: "",
+    customerPO: "",
+    material: "",
+    descripcion: productDescriptions[0],
+    producto: "",
+    clientePrincipal: "",
+    ubicacion: warehouses[0].location,
+    bodega: warehouses[0].name,
+    planta: "Magallanes",
+    produccion: new Date().toISOString().slice(0, 10),
+    eta: new Date().toISOString().slice(0, 10),
+    status: "CONFIRMADO" as TrackingStatus,
+    cajasOrden: 100,
+    formatoCaja: 35,
+    cajasDisponibles: "",
+    sector: "SA",
+    trim: "TD",
+    size: "4-5",
+    escamas: "",
+    awb: "",
+    time: "AM",
+    empacado: productTypes[0],
   });
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => { setFormData(prev => ({ ...prev, [e.target.name]: e.target.value })); };
@@ -1134,7 +1157,19 @@ function NewPOForm({ onCreate, onCancel }: { onCreate: (data: Omit<InventoryRow,
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.customId || !formData.po || !formData.material) return;
-    onCreate({ ...formData, cajasOrden: Number(formData.cajasOrden), formatoCaja: Number(formData.formatoCaja), awb: formData.awb || null, escamas: formData.escamas || null });
+    const cajasOrden = Number(formData.cajasOrden) || 0;
+    const formatoCaja = Number(formData.formatoCaja) || 0;
+    const cajasDisponiblesValue = formData.cajasDisponibles === "" ? cajasOrden : Number(formData.cajasDisponibles);
+    const cajasDisponibles = Number.isFinite(cajasDisponiblesValue) ? cajasDisponiblesValue : cajasOrden;
+    const { cajasDisponibles: _omit, ...base } = formData;
+    onCreate({
+      ...base,
+      cajasOrden,
+      formatoCaja,
+      awb: base.awb || null,
+      escamas: base.escamas || null,
+      cajasDisponibles,
+    });
   };
 
   return (
@@ -1150,25 +1185,34 @@ function NewPOForm({ onCreate, onCancel }: { onCreate: (data: Omit<InventoryRow,
             <div><label className="block font-bold mb-1">PO (*)</label><input name="po" value={formData.po} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
             <div><label className="block font-bold mb-1">Customer PO</label><input name="customerPO" value={formData.customerPO} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
             <div><label className="block font-bold mb-1">Material</label><input name="material" value={formData.material} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
-            <div><label className="block font-bold mb-1">Cliente Principal</label><input name="clientePrincipal" value={formData.clientePrincipal} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
             <div><label className="block font-bold mb-1">Descripción</label><select name="descripcion" value={formData.descripcion} onChange={handleChange} className="input-brand w-full px-3 py-2">{productDescriptions.map(desc => (<option key={desc} value={desc}>{desc}</option>))}</select></div>
+            <div><label className="block font-bold mb-1">Producto / SKU</label><input name="producto" value={formData.producto} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
+            <div><label className="block font-bold mb-1">Cliente Principal</label><input name="clientePrincipal" value={formData.clientePrincipal} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
+            <div><label className="block font-bold mb-1">AWB</label><input name="awb" value={formData.awb} onChange={handleChange} className="input-brand w-full px-3 py-2" placeholder="123-45678901" /></div>
             <div className="grid grid-cols-2 gap-4">
               <div><label className="block font-bold mb-1">Cajas</label><input type="number" name="cajasOrden" value={formData.cajasOrden} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
               <div><label className="block font-bold mb-1">Formato (Lb)</label><input type="number" name="formatoCaja" value={formData.formatoCaja} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
             </div>
+            <div><label className="block font-bold mb-1">Cajas Disponibles</label><input type="number" name="cajasDisponibles" value={formData.cajasDisponibles} onChange={handleChange} className="input-brand w-full px-3 py-2" placeholder="Igual a Cajas si se deja vacío" /></div>
           </div>
           <div className="space-y-4">
             <div><label className="block font-bold mb-1">Bodega</label><select onChange={handleWarehouseChange} value={formData.bodega} className="input-brand w-full px-3 py-2">{warehouses.map(wh => (<option key={wh.name} value={wh.name}>{wh.name} / {wh.location}</option>))}</select></div>
+            <div><label className="block font-bold mb-1">Ubicación</label><input name="ubicacion" value={formData.ubicacion} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
+            <div><label className="block font-bold mb-1">Planta</label><input name="planta" value={formData.planta} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
             <div className="grid grid-cols-2 gap-4">
               <div><label className="block font-bold mb-1">Prod. Date</label><input type="date" name="produccion" value={formData.produccion} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
               <div><label className="block font-bold mb-1">ETA</label><input type="date" name="eta" value={formData.eta} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
             </div>
-            <div><label className="block font-bold mb-1">Empacado</label><select name="empacado" value={formData.empacado} onChange={handleChange} className="input-brand w-full px-3 py-2">{productTypes.map(type => (<option key={type} value={type}>{type}</option>))}</select></div>
+            <div className="grid grid-cols-2 gap-4">
+              <div><label className="block font-bold mb-1">Horario</label><select name="time" value={formData.time} onChange={handleChange} className="input-brand w-full px-3 py-2"><option value="AM">AM</option><option value="PM">PM</option></select></div>
+              <div><label className="block font-bold mb-1">Empacado</label><select name="empacado" value={formData.empacado} onChange={handleChange} className="input-brand w-full px-3 py-2">{productTypes.map(type => (<option key={type} value={type}>{type}</option>))}</select></div>
+            </div>
             <div className="grid grid-cols-3 gap-4">
                 <div><label className="block font-bold mb-1">Sector</label><input name="sector" value={formData.sector} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
                 <div><label className="block font-bold mb-1">Trim</label><input name="trim" value={formData.trim} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
                 <div><label className="block font-bold mb-1">Size</label><input name="size" value={formData.size} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
             </div>
+            <div><label className="block font-bold mb-1">Escamas</label><input name="escamas" value={formData.escamas} onChange={handleChange} className="input-brand w-full px-3 py-2" placeholder="Opcional" /></div>
             <div><label className="block font-bold mb-1">Status</label><select name="status" value={formData.status} onChange={handleChange} className="input-brand w-full px-3 py-2"><option value="CONFIRMADO">Confirmado</option><option value="EN_TRANSITO">En Tránsito</option></select></div>
           </div>
         </div>
