@@ -404,6 +404,7 @@ export default function App() {
   const [editingInventoryRow, setEditingInventoryRow] = useState<InventoryRow | null>(null);
   const [showArchivedAssignments, setShowArchivedAssignments] = useState(false);
   const [showNewSOForm, setShowNewSOForm] = useState(false);
+  const [editingSalesOrder, setEditingSalesOrder] = useState<SalesOrder | null>(null);
 
   const path = typeof window !== "undefined" ? window.location.pathname : "/";
   const isTrackingRoute = path.includes("/track/");
@@ -515,6 +516,8 @@ export default function App() {
       a.sector.localeCompare(b.sector) || a.trim.localeCompare(b.trim) || a.size.localeCompare(b.size)
     );
   }, [inventory]);
+
+  const trackingInventory = useMemo(() => inventory.filter(row => row.status !== "ENTREGADO"), [inventory]);
   
   const handleCreateNewSalesOrder = (data: Omit<SalesOrder, 'id'>) => {
     const newOrder: SalesOrder = { ...data, id: `DEM-${uid()}` };
@@ -524,6 +527,15 @@ export default function App() {
       return nextState;
     });
     setShowNewSOForm(false);
+  };
+
+  const handleUpdateSalesOrder = (data: SalesOrder) => {
+    setSalesOrders(prev => {
+      const nextState = prev.map(order => order.id === data.id ? data : order);
+      saveSalesOrdersToStorage(nextState);
+      return nextState;
+    });
+    setEditingSalesOrder(null);
   };
 
   const handleCreateNewPO = (data: InventoryFormPayload) => {
@@ -695,8 +707,8 @@ export default function App() {
           {tab === "inventory" && ( <InventoryView rows={filteredInventory} onNewPO={() => setShowNewPOForm(true)} onEdit={setEditingInventoryRow} /> )}
           {tab === "warehouse" && ( <WarehouseView inventory={inventory.filter(r => r.activo)} /> )}
           {tab === "assignments" && ( <AssignmentsView assignments={assignments} salesOrders={salesOrders} onToggleState={handleToggleAssignmentState} onNewAssignmentOrden={() => { setAssignmentMode("ORDEN"); setShowAssignmentForm(true); }} onNewAssignmentSpot={() => { setAssignmentMode("SPOT"); setShowAssignmentForm(true); }} showArchived={showArchivedAssignments} onToggleArchived={() => setShowArchivedAssignments(prev => !prev)} /> )}
-          {tab === "clientUpdate" && ( <ClientUpdateView inventory={inventory} onStatusChange={handleUpdateInventoryStatus} onSendEmail={sendTrackingEmail} onCreateCombinedLink={handleCreateCombinedTrackingLink} /> )}
-          {tab === 'orders' && <SalesOrdersView orders={salesOrders} onNewOrder={() => setShowNewSOForm(true)} />}
+          {tab === "clientUpdate" && ( <ClientUpdateView inventory={trackingInventory} onStatusChange={handleUpdateInventoryStatus} onSendEmail={sendTrackingEmail} onCreateCombinedLink={handleCreateCombinedTrackingLink} /> )}
+          {tab === 'orders' && <SalesOrdersView orders={salesOrders} onNewOrder={() => setShowNewSOForm(true)} onEditOrder={setEditingSalesOrder} />}
           {tab === "categories" && <CategoriesView summary={categorySummary} />}
         </main>
       </div>
@@ -704,7 +716,8 @@ export default function App() {
       {showAssignmentForm && <AssignmentForm mode={assignmentMode} inventory={inventory.filter(r => r.activo && r.cajasInv > 0)} salesOrders={salesOrders} onCreate={handleCreateAssignment} onCancel={() => setShowAssignmentForm(false)} />}
       {showNewPOForm && <NewPOForm mode="create" onSubmit={handleCreateNewPO} onCancel={() => setShowNewPOForm(false)} />}
       {editingInventoryRow && <NewPOForm mode="edit" initialData={editingInventoryRow} onSubmit={handleUpdatePO} onCancel={() => setEditingInventoryRow(null)} />}
-      {showNewSOForm && <NewSalesOrderForm onCreate={handleCreateNewSalesOrder} onCancel={() => setShowNewSOForm(false)} />}
+      {showNewSOForm && <NewSalesOrderForm mode="create" onCreate={handleCreateNewSalesOrder} onCancel={() => setShowNewSOForm(false)} />}
+      {editingSalesOrder && <NewSalesOrderForm mode="edit" initialData={editingSalesOrder} onUpdate={handleUpdateSalesOrder} onCancel={() => setEditingSalesOrder(null)} />}
     </>
   );
 }
@@ -1141,7 +1154,7 @@ function ClientUpdateView({ inventory, onStatusChange, onSendEmail, onCreateComb
   );
 }
 
-function SalesOrdersView({ orders, onNewOrder }: { orders: SalesOrder[], onNewOrder: () => void }) { 
+function SalesOrdersView({ orders, onNewOrder, onEditOrder }: { orders: SalesOrder[], onNewOrder: () => void; onEditOrder: (order: SalesOrder) => void; }) { 
   return (
     <div className="bg-white shadow-sm border border-[#D7D2CB]">
       <div className="p-6 border-b border-[#D7D2CB] flex items-center justify-between">
@@ -1149,7 +1162,7 @@ function SalesOrdersView({ orders, onNewOrder }: { orders: SalesOrder[], onNewOr
         <button onClick={onNewOrder} className="btn-primary px-4 py-2 text-xs font-bold uppercase flex items-center gap-2"><Plus className="h-3 w-3" /> Crear Orden</button>
       </div>
       <div className="hidden sm:block overflow-x-auto">
-        <table className="w-full text-xs text-[#6E6259] min-w-[1100px]">
+        <table className="w-full text-xs text-[#6E6259] min-w-[1200px]">
           <thead>
             <tr className="table-header">
               <th className="py-3 px-4 text-left">Sales Rep</th>
@@ -1171,6 +1184,7 @@ function SalesOrdersView({ orders, onNewOrder }: { orders: SalesOrder[], onNewOr
               <th className="px-4 text-left">Flex</th>
               <th className="px-4 text-left">Order #</th>
               <th className="px-4 text-left">Brand</th>
+              <th className="px-4 text-right">Acción</th>
             </tr>
           </thead>
           <tbody className="font-['Merriweather']">
@@ -1195,9 +1209,12 @@ function SalesOrdersView({ orders, onNewOrder }: { orders: SalesOrder[], onNewOr
                 <td className="px-4">{o.flex}</td>
                 <td className="px-4">{o.orden}</td>
                 <td className="px-4">{o.brand}</td>
+                <td className="px-4 text-right">
+                  <button onClick={() => onEditOrder(o)} className="text-[#FE5000] font-bold text-[10px] uppercase hover:underline">Edit</button>
+                </td>
               </tr>
             ))}
-             {orders.length === 0 && ( <tr><td colSpan={19} className="text-center py-8 text-[#D7D2CB] italic">No hay órdenes de venta.</td></tr> )}
+             {orders.length === 0 && ( <tr><td colSpan={20} className="text-center py-8 text-[#D7D2CB] italic">No hay órdenes de venta.</td></tr> )}
           </tbody>
         </table>
       </div>
@@ -1235,6 +1252,9 @@ function SalesOrdersView({ orders, onNewOrder }: { orders: SalesOrder[], onNewOr
               <div><span className="font-bold uppercase">Port:</span> {o.portEntry}</div>
               <div><span className="font-bold uppercase">Truck:</span> {o.truck}</div>
               <div><span className="font-bold uppercase">Status:</span> {o.estadoProgreso}</div>
+            </div>
+            <div className="flex justify-end">
+              <button onClick={() => onEditOrder(o)} className="text-[#FE5000] font-bold text-[11px] uppercase hover:underline">Edit</button>
             </div>
           </div>
         ))}
@@ -1435,22 +1455,149 @@ function NewPOForm({ mode, initialData, onSubmit, onCancel }: { mode: "create" |
   );
 }
 
-function NewSalesOrderForm({ onCreate, onCancel }: { onCreate: (data: Omit<SalesOrder, 'id'>) => void; onCancel: () => void; }) {
-  const [formData, setFormData] = useState<Omit<SalesOrder, 'id'>>({ salesRep: "Juan Pérez", demandId: `DEM-${new Date().getFullYear()}-${Math.floor(Math.random() * 9000) + 1000}`, tos: "FOB", shipTo: "", pickUpDate: new Date().toISOString().slice(0, 10), brand1: "AquaChile", material: "", description: "", cases: 0, price: 0, flex: "No", incoterm: "FOB MIA", truck: "", customerPO: "", portEntry: "Miami", week: `W${Math.ceil((new Date().getDate() + new Date().getDay() + 1) / 7)}`, estadoAprobacion: "EN REVISIÓN", estadoProgreso: "PENDIENTE APROBACIÓN", unidadPrecio: "USD / lb", orden: "", estadoPlanificacion: "PENDIENTE", especie: "SA", especieDescripcion: "Salmón Atlántico", estadoDetPrecio: "PENDIENTE", incoterms2: "FOB", brand: "AquaChile", });
+type SalesOrderFormState = {
+  salesRep: string;
+  demandId: string;
+  tos: string;
+  shipTo: string;
+  pickUpDate: string;
+  brand1: string;
+  material: string;
+  description: string;
+  cases: string;
+  price: string;
+  flex: string;
+  incoterm: string;
+  truck: string;
+  customerPO: string;
+  portEntry: string;
+  week: string;
+  estadoAprobacion: string;
+  estadoProgreso: string;
+  unidadPrecio: string;
+  orden: string;
+  estadoPlanificacion: string;
+  especie: string;
+  especieDescripcion: string;
+  estadoDetPrecio: string;
+  incoterms2: string;
+  brand: string;
+};
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => { setFormData(prev => ({ ...prev, [e.target.name]: e.target.value })); };
+function NewSalesOrderForm({ mode, initialData, onCreate, onUpdate, onCancel }: { mode: 'create' | 'edit'; initialData?: SalesOrder; onCreate?: (data: Omit<SalesOrder, 'id'>) => void; onUpdate?: (data: SalesOrder) => void; onCancel: () => void; }) {
+  const isEditing = mode === 'edit';
+  const baseState: SalesOrderFormState = {
+    salesRep: 'Juan Pérez',
+    demandId: `DEM-${new Date().getFullYear()}-${Math.floor(Math.random() * 9000) + 1000}`,
+    tos: 'FOB',
+    shipTo: '',
+    pickUpDate: new Date().toISOString().slice(0, 10),
+    brand1: 'AquaChile',
+    material: '',
+    description: '',
+    cases: '0',
+    price: '0',
+    flex: 'No',
+    incoterm: 'FOB MIA',
+    truck: '',
+    customerPO: '',
+    portEntry: 'Miami',
+    week: `W${Math.ceil((new Date().getDate() + new Date().getDay() + 1) / 7)}`,
+    estadoAprobacion: 'EN REVISIÓN',
+    estadoProgreso: 'PENDIENTE APROBACIÓN',
+    unidadPrecio: 'USD / lb',
+    orden: '',
+    estadoPlanificacion: 'PENDIENTE',
+    especie: 'SA',
+    especieDescripcion: 'Salmón Atlántico',
+    estadoDetPrecio: 'PENDIENTE',
+    incoterms2: 'FOB',
+    brand: 'AquaChile',
+  };
+
+  const mapFromRow = (row: SalesOrder): SalesOrderFormState => ({
+    salesRep: row.salesRep,
+    demandId: row.demandId,
+    tos: row.tos,
+    shipTo: row.shipTo,
+    pickUpDate: row.pickUpDate,
+    brand1: row.brand1,
+    material: row.material,
+    description: row.description,
+    cases: String(row.cases),
+    price: String(row.price),
+    flex: row.flex,
+    incoterm: row.incoterm,
+    truck: row.truck,
+    customerPO: row.customerPO,
+    portEntry: row.portEntry,
+    week: row.week,
+    estadoAprobacion: row.estadoAprobacion,
+    estadoProgreso: row.estadoProgreso,
+    unidadPrecio: row.unidadPrecio,
+    orden: row.orden,
+    estadoPlanificacion: row.estadoPlanificacion,
+    especie: row.especie,
+    especieDescripcion: row.especieDescripcion,
+    estadoDetPrecio: row.estadoDetPrecio,
+    incoterms2: row.incoterms2,
+    brand: row.brand,
+  });
+
+  const [formData, setFormData] = useState<SalesOrderFormState>(initialData ? mapFromRow(initialData) : baseState);
+
+  useEffect(() => {
+    setFormData(initialData ? mapFromRow(initialData) : baseState);
+  }, [initialData, mode]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.demandId || !formData.shipTo) return;
-    const payload = { ...formData, orden: formData.orden || "", cases: Number(formData.cases) || 0, price: Number(formData.price) || 0 };
-    onCreate(payload);
+    const payload: Omit<SalesOrder, 'id'> = {
+      salesRep: formData.salesRep,
+      demandId: formData.demandId,
+      tos: formData.tos,
+      shipTo: formData.shipTo,
+      pickUpDate: formData.pickUpDate,
+      brand1: formData.brand1,
+      material: formData.material,
+      description: formData.description,
+      cases: Number(formData.cases) || 0,
+      price: Number(formData.price) || 0,
+      flex: formData.flex,
+      incoterm: formData.incoterm,
+      truck: formData.truck,
+      customerPO: formData.customerPO,
+      portEntry: formData.portEntry,
+      week: formData.week,
+      estadoAprobacion: formData.estadoAprobacion,
+      estadoProgreso: formData.estadoProgreso,
+      unidadPrecio: formData.unidadPrecio,
+      orden: formData.orden,
+      estadoPlanificacion: formData.estadoPlanificacion,
+      especie: formData.especie,
+      especieDescripcion: formData.especieDescripcion,
+      estadoDetPrecio: formData.estadoDetPrecio,
+      incoterms2: formData.incoterms2,
+      brand: formData.brand,
+    };
+    if (isEditing && initialData && onUpdate) {
+      onUpdate({ ...payload, id: initialData.id });
+    } else if (!isEditing && onCreate) {
+      onCreate(payload);
+    }
   };
 
   return (
     <div className="fixed inset-0 bg-[#425563]/80 flex items-center justify-center z-50 p-4">
       <form onSubmit={handleSubmit} className="bg-white shadow-2xl max-w-4xl w-full p-8 max-h-[90vh] overflow-y-auto border-t-8 border-[#FE5000]">
         <div className="flex items-center justify-between pb-4 border-b border-[#D7D2CB] mb-6">
-          <h2 className="text-xl font-bold text-[#425563] font-['Quicksand']">NUEVA ORDEN DE VENTA</h2>
+          <h2 className="text-xl font-bold text-[#425563] font-['Quicksand']">{isEditing ? 'EDITAR ORDEN DE VENTA' : 'NUEVA ORDEN DE VENTA'}</h2>
           <button type="button" onClick={onCancel} className="text-[#6E6259] hover:text-[#FE5000]"><X className="h-6 w-6" /></button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm text-[#6E6259]">
@@ -1471,12 +1618,12 @@ function NewSalesOrderForm({ onCreate, onCancel }: { onCreate: (data: Omit<Sales
             <div className="space-y-4">
               <div><label className="block font-bold mb-1">Incoterm</label><input name="incoterm" value={formData.incoterm} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
               <div><label className="block font-bold mb-1">Port</label><input name="portEntry" value={formData.portEntry} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
-              <div><label className="block font-bold mb-1">Sales Order #</label><input name="orden" value={formData.orden} onChange={handleChange} className="input-brand w-full px-3 py-2" /></div>
+              <div><label className="block font-bold mb-1">Sales Order #</label><input name="orden" value={formData.orden} onChange={handleChange} className="input-brand w-full px-3 py-2" placeholder="Opcional" /></div>
             </div>
         </div>
         <div className="flex justify-end gap-4 pt-6 border-t border-[#D7D2CB] mt-6">
           <button type="button" onClick={onCancel} className="text-[#6E6259] font-bold uppercase text-xs hover:text-[#425563]">Cancelar</button>
-          <button type="submit" className="btn-primary px-6 py-2 text-xs font-bold uppercase rounded-none">Guardar Orden</button>
+          <button type="submit" className="btn-primary px-6 py-2 text-xs font-bold uppercase rounded-none">{isEditing ? 'Actualizar Orden' : 'Guardar Orden'}</button>
         </div>
       </form>
     </div>
