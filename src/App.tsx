@@ -189,6 +189,13 @@ interface Assignment {
   items: OrderItem[];
 }
 
+type StoredAssignment = Omit<Assignment, "items"> & { items?: OrderItem[] };
+
+const sanitizeAssignment = (data: StoredAssignment): Assignment => ({
+  ...data,
+  items: Array.isArray(data.items) ? data.items : [],
+});
+
 type DashboardAgg = {
   byWarehouse: { bodega: string; totalCajas: number; totalLbs: number }[];
   byStatus: { status: string; cajas: number }[];
@@ -302,7 +309,7 @@ function loadAssignmentsFromStorage(): Assignment[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = window.localStorage.getItem(ASSIGNMENTS_LS_KEY);
-    return raw ? (JSON.parse(raw) as Assignment[]) : [];
+    return raw ? (JSON.parse(raw) as StoredAssignment[]).map(sanitizeAssignment) : [];
   } catch { return []; }
 }
 
@@ -354,8 +361,10 @@ export default function App() {
   const [showNewSOForm, setShowNewSOForm] = useState(false);
 
   const path = typeof window !== "undefined" ? window.location.pathname : "/";
-  if (path.startsWith("/track/")) {
-    const token = path.split("/track/")[1] || "";
+  const isTrackingRoute = path.includes("/track/");
+  if (isTrackingRoute) {
+    const tokenWithParams = path.split("/track/")[1] || "";
+    const token = tokenWithParams.split(/[/?]/)[0];
     const storedInventory = loadInventoryFromStorage();
     const storedAssignments = loadAssignmentsFromStorage();
     const storedSalesOrders = loadSalesOrdersFromStorage();
@@ -893,7 +902,8 @@ function AssignmentsView({ assignments, salesOrders, onToggleState, onNewAssignm
           <thead><tr className="table-header"><th className="py-3 px-4 text-left">ID</th><th className="px-4 text-left">Fecha</th><th className="px-4 text-left">Tipo</th><th className="px-4 text-left">Cliente</th><th className="px-4 text-left">Ref</th><th className="px-4 text-right">Cajas</th><th className="px-4 text-right">Acción</th></tr></thead>
           <tbody className="font-['Merriweather']">
             {filteredAssignments.map(asg => {
-              const cajas = asg.items.reduce((s, it) => s + it.cajas, 0);
+              const assignmentItems = Array.isArray(asg.items) ? asg.items : [];
+              const cajas = assignmentItems.reduce((s, it) => s + it.cajas, 0);
               const ref = asg.tipo === 'ORDEN' ? (salesOrders.find(s => s.id === asg.salesOrderId)?.demandId ?? asg.salesOrderId) : asg.spotRef;
               return (
                 <tr key={asg.id} className="border-b border-[#F0EFE9] hover:bg-[#F9F8F6]">
